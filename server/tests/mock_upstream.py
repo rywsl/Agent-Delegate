@@ -8,6 +8,7 @@ tool result ends with a report; requests without tools (background helpers) get 
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 
@@ -120,8 +121,14 @@ def create_app() -> FastAPI:
     return app
 
 
-def serve_in_thread(port: int) -> uvicorn.Server:
-    server = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning"))
+def serve_in_thread(port: int, host: str | None = None) -> uvicorn.Server:
+    """Start the scripted upstream on ``host`` (default MOCK_BIND_HOST, else loopback).
+
+    When new-api runs in a container it reaches the host as host.docker.internal, which needs a
+    non-loopback listener: set MOCK_BIND_HOST=0.0.0.0 for that setup.
+    """
+    host = host or os.environ.get("MOCK_BIND_HOST", "127.0.0.1")
+    server = uvicorn.Server(uvicorn.Config(create_app(), host=host, port=port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(100):
         if server.started:

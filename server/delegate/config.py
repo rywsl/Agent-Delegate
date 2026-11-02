@@ -98,6 +98,23 @@ class Settings:
         return (quota or 0) / self.newapi_quota_per_unit
 
 
+def ensure_data_dirs() -> None:
+    """Create the artifact directories while running as the web user.
+
+    The worker runs as root (it needs the Docker socket) and the web site as an unprivileged user;
+    whoever creates ``/data/tasks`` first owns it, and the other one can no longer add task
+    directories. The web process therefore creates them at startup, before the worker runs.
+    """
+    s = get_settings()
+    for path in (s.artifacts_dir, s.uploads_dir):
+        path.mkdir(parents=True, exist_ok=True)
+        if not os.access(path, os.W_OK):  # mkdir(exist_ok=True) silently accepts a foreign owner
+            raise RuntimeError(
+                f"{path} is not writable by this process; the data volume was probably created by "
+                "the root worker. Fix it once with: docker compose exec -u root web chown -R 10002:10002 /data"
+            )
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     secret = _env("DELEGATE_SECRET_KEY")

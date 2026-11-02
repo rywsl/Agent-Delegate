@@ -66,7 +66,8 @@ class FakeNewApi:
         self.users[uid] = user
         return user
 
-    def consume(self, key: str, quota: int, prompt: int, completion: int, model: str = "claude-sonnet-5-5") -> None:
+    def consume(self, key: str, quota: int, prompt: int, completion: int, model: str = "claude-sonnet-5-5",
+                other: dict[str, Any] | None = None) -> None:
         """Simulate one relayed model call billed to the token with this key."""
         raw = key[3:] if key.startswith("sk-") else key
         token = next(t for t in self.tokens.values() if t["key"] == raw)
@@ -80,7 +81,8 @@ class FakeNewApi:
             "id": len(self.logs) + 1, "user_id": user["id"], "created_at": int(time.time()), "type": 2,
             "content": "", "username": user["username"], "token_name": token["name"], "model_name": model,
             "quota": quota, "prompt_tokens": prompt, "completion_tokens": completion, "use_time": 3,
-            "is_stream": True, "token_id": token["id"], "request_id": secrets.token_hex(8), "other": "{}",
+            "is_stream": True, "token_id": token["id"], "request_id": secrets.token_hex(8),
+            "other": json.dumps(other or {}),
         })
 
     # ------------------------------------------------------------------ dispatcher

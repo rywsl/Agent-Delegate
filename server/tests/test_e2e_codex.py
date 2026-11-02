@@ -20,6 +20,10 @@ pytestmark = pytest.mark.skipif(
     not (URL and os.environ.get("CODEX_E2E") and shutil.which("codex")), reason="CODEX_E2E/NEWAPI_TEST_URL not set"
 )
 MOCK_PORT = 3397
+# The mock upstream runs in this process; when new-api runs in a container, 127.0.0.1 is the
+# container itself, so the gateway has to be pointed at something like host.docker.internal.
+# MOCK_BASE_URL may use a {port} placeholder (the claude e2e test listens on another port).
+MOCK_BASE_URL = os.environ.get("MOCK_BASE_URL", "http://127.0.0.1:{port}").replace("{port}", str(MOCK_PORT))
 MODEL = "gpt-5.5"
 ROOT_PASSWORD = "Root-Integration-Pass-1"
 RUNNER = Path(__file__).resolve().parents[2] / "sandbox" / "runner.py"
@@ -44,10 +48,16 @@ def _setup_gateway(root_pat: str) -> None:
     jwt = httpx.post(f"{URL}/api/user/login", json={"username": "root", "password": ROOT_PASSWORD}).json()
     with httpx.Client(base_url=URL, headers={"Authorization": f"Bearer {jwt['data']['access_token']}"}) as s:
         items = (s.get("/api/channel/", params={"p": 1, "page_size": 100}).json().get("data") or {}).get("items") or []
-        if not any(c.get("name") == "mock-openai" for c in items):
+        channel = next((c for c in items if c.get("name") == "mock-openai"), None)
+        if channel is not None and channel.get("base_url") != MOCK_BASE_URL:
+            # a channel left by an earlier run still points at the old mock address; the update
+            # endpoint rejects a full channel payload, so replace it instead
+            assert s.delete(f"/api/channel/{channel['id']}").json()["success"]
+            channel = None
+        if channel is None:
             resp = s.post("/api/channel/", json={"mode": "single", "channel": {
                 "type": 1, "name": "mock-openai", "key": "mock-upstream-key",
-                "base_url": f"http://127.0.0.1:{MOCK_PORT}", "models": MODEL, "group": "default", "status": 1}}).json()
+                "base_url": MOCK_BASE_URL, "models": MODEL, "group": "default", "status": 1}}).json()
             assert resp["success"], resp
     with httpx.Client(base_url=URL, headers={"Authorization": f"Bearer {root_pat}"}) as opts:
         for key, value in (("ModelRatio", {MODEL: 0.625, "claude-sonnet-5-5": 1.5, "claude-haiku-5-5": 0.5}),

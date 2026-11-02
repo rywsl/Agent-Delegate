@@ -21,6 +21,10 @@ pytestmark = pytest.mark.skipif(
     not (URL and os.environ.get("CLAUDE_E2E") and shutil.which("claude")), reason="CLAUDE_E2E/NEWAPI_TEST_URL not set"
 )
 MOCK_PORT = 3398
+# The mock upstream runs in this process; when new-api runs in a container, 127.0.0.1 is the
+# container itself, so the gateway has to be pointed at something like host.docker.internal.
+# MOCK_BASE_URL may use a {port} placeholder (the codex e2e test listens on another port).
+MOCK_BASE_URL = os.environ.get("MOCK_BASE_URL", "http://127.0.0.1:{port}").replace("{port}", str(MOCK_PORT))
 MODEL = "claude-sonnet-5-5"
 ROOT_PASSWORD = "Root-Integration-Pass-1"
 RUNNER = Path(__file__).resolve().parents[2] / "sandbox" / "runner.py"
@@ -35,10 +39,16 @@ def _ensure_channel_and_pricing(root_pat: str) -> None:
     with _root_session() as s:
         existing = s.get("/api/channel/", params={"p": 1, "page_size": 100}).json()
         items = (existing.get("data") or {}).get("items") or []
-        if not any(c.get("name") == "mock-anthropic" for c in items):
+        channel = next((c for c in items if c.get("name") == "mock-anthropic"), None)
+        if channel is not None and channel.get("base_url") != MOCK_BASE_URL:
+            # a channel left by an earlier run still points at the old mock address; the update
+            # endpoint rejects a full channel payload, so replace it instead
+            assert s.delete(f"/api/channel/{channel['id']}").json()["success"]
+            channel = None
+        if channel is None:
             resp = s.post("/api/channel/", json={"mode": "single", "channel": {
                 "type": 14, "name": "mock-anthropic", "key": "mock-upstream-key",
-                "base_url": f"http://127.0.0.1:{MOCK_PORT}", "models": f"{MODEL},claude-haiku-5-5",
+                "base_url": MOCK_BASE_URL, "models": f"{MODEL},claude-haiku-5-5",
                 "group": "default", "status": 1}}).json()
             assert resp["success"], resp
     opts = httpx.Client(base_url=URL, headers={"Authorization": f"Bearer {root_pat}"})

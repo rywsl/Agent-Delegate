@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from .. import billing
-from ..config import get_settings
+from ..config import ensure_data_dirs, get_settings
 from ..db import init_db, new_session
 from . import routes_admin, routes_api, routes_auth, routes_pages
 from .deps import LoginRequired, current_user, render
@@ -32,6 +32,7 @@ def _bootstrap_sidecar() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    ensure_data_dirs()
     init_db()
     threading.Thread(target=_bootstrap_sidecar, daemon=True).start()
     yield

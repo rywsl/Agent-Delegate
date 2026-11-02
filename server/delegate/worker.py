@@ -13,7 +13,7 @@ from pathlib import Path
 from sqlalchemy import func, select, update
 
 from . import audit, billing, sandbox, transfer
-from .config import get_settings
+from .config import ensure_data_dirs, get_settings
 from .db import init_db, session_scope
 from .events import NormEvent, Normalizer
 from .models import Task, TaskEvent, TaskStatus, User, utcnow
@@ -317,6 +317,7 @@ class Worker:
                     log.warning("billing reconcile for %s failed: %s", task.id, exc)
 
     def run_forever(self) -> None:
+        ensure_data_dirs()
         init_db()
         self.recover()
         log.info("worker %s started (max %d sandboxes)", self.worker_id, self.settings.sandbox_max_concurrent)

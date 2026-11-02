@@ -114,7 +114,7 @@
   <div class="row">
     <div><div class="stat-label">网关计费（权威）</div>
       <div class="stat">{{ fmt_usd(task.billed_quota) }}</div>
-      <div class="small muted">输入 {{ fmt_int(task.billed_prompt_tokens) }} · 输出 {{ fmt_int(task.billed_completion_tokens) }} tokens · {{ task.billed_requests }} 次请求<br>
+      <div class="small muted">输入 {{ fmt_int(task.billed_prompt_tokens) }}（含缓存） · 输出 {{ fmt_int(task.billed_completion_tokens) }} tokens · {{ task.billed_requests }} 次请求<br>
         {% if task.billing_reconciled_at %}对账于 {{ fmt_dt(task.billing_reconciled_at) }}{% else %}尚未对账{% endif %}</div></div>
     {% set au = task.agent_usage or {} %}
     <div><div class="stat-label">Agent 自报用量（参考）</div>
