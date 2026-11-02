@@ -90,7 +90,9 @@ services:
     networks: [backend]
 
   new-api:
-    image: calciumion/new-api:${NEWAPI_VERSION:-latest}
+    # NEWAPI_IMAGE may be a tag or a digest-qualified reference, e.g.
+    # calciumion/new-api@sha256:… (the site's billing reconciliation reads its log schema).
+    image: ${NEWAPI_IMAGE:-calciumion/new-api:latest}
     restart: unless-stopped
     command: ["--log-dir", "/app/logs"]
     environment:

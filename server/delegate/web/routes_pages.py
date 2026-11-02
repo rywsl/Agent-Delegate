@@ -196,15 +196,20 @@ def task_billing(task_id: str, user: User = Depends(require_user), db: Session =
     except billing.BillingError as exc:
         return {"error": str(exc), "logs": []}
     s = get_settings()
-    return {
-        "logs": [
+    rows = []
+    for log in logs:
+        usage = billing.parse_log(log)
+        rows.append(
             {
                 "time": log.get("created_at"),
                 "type": log.get("type"),
                 "content": (log.get("content") or "")[:300],
                 "model": log.get("model_name"),
-                "prompt_tokens": log.get("prompt_tokens", 0),
-                "completion_tokens": log.get("completion_tokens", 0),
+                "prompt_tokens": log.get("prompt_tokens", 0),  # raw gateway value (Anthropic: no cache)
+                "completion_tokens": usage.output_tokens,
+                "input_tokens": usage.input_tokens,
+                "cache_read_tokens": usage.cache_read_tokens,
+                "cache_write_tokens": usage.cache_write_tokens,
                 "quota": log.get("quota", 0),
                 "cost_usd": round(s.quota_to_usd(log.get("quota", 0)), 6),
                 "use_time": log.get("use_time"),
@@ -212,9 +217,8 @@ def task_billing(task_id: str, user: User = Depends(require_user), db: Session =
                 "request_id": log.get("request_id"),
                 "other": log.get("other"),
             }
-            for log in logs
-        ]
-    }
+        )
+    return {"logs": rows}
 
 
 @router.post("/tasks/{task_id}/cancel", dependencies=[Depends(verify_csrf)])
@@ -314,6 +318,8 @@ def billing_page(request: Request, page: int = 1, user: User = Depends(require_u
         usage, usage_total = billing.user_logs(user, page=page, page_size=PAGE_SIZE)
     except billing.BillingError as exc:
         usage_error = str(exc)
+    # Anthropic-style logs keep cache read/write outside prompt_tokens; show the full input count.
+    usage = [{**row, "input_tokens": billing.parse_log(row).input_tokens} for row in usage]
     task_by_token = {}
     names = {row.get("token_name") for row in usage if row.get("token_name")}
     if names:

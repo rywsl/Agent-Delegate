@@ -149,7 +149,7 @@ def format_task(view: dict[str, Any]) -> str:
         lines.append(f"All outputs: curl -fsSL {_shell_quote(outputs['bundle_url'])} | tar -xzf - -C <dest-dir>")
 
     billing = view.get("billing") or {}
-    cost = f"${billing.get('cost_usd', 0):.4f}, {billing.get('tokens', 0):,} tokens"
+    cost = f"${billing.get('cost_usd', 0):.4f}, {billing.get('tokens', 0):,} tokens (cache read/write included in input)"
     lines += ["", f"Cost: {cost}{'' if billing.get('final') else ' (provisional)'}"]
     lines.append("Download links expire after a while; call wait_task again for fresh ones.")
     lines.append(f"Audit trail (for humans): {view['audit_url']}")

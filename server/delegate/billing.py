@@ -19,6 +19,7 @@ import os
 import secrets
 import threading
 import time
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -328,11 +329,66 @@ def task_logs(task: Task) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda r: (r.get("created_at", 0), r.get("id", 0)))
 
 
+@dataclass(frozen=True)
+class LogUsage:
+    """Token counts of one gateway log entry (``input_tokens`` includes cached input)."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+
+
+def _as_int(value: Any) -> int:
+    """new-api's ``other`` payload is free-form: never let a bad value break a whole page."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _log_other(row: dict[str, Any]) -> dict[str, Any]:
+    """The ``other`` payload of a gateway log entry (JSON string in new-api, dict in tests)."""
+    other = row.get("other")
+    if isinstance(other, str):
+        try:
+            other = json.loads(other)
+        except ValueError:
+            return {}
+    return other if isinstance(other, dict) else {}
+
+
+def parse_log(row: dict[str, Any]) -> LogUsage:
+    """Token counts of one gateway log entry.
+
+    new-api reports ``prompt_tokens`` *without* the Anthropic cache reads/writes and keeps those
+    in ``other`` (``usage_semantic == "anthropic"``); OpenAI/Gemini requests count cached tokens
+    as input already, and newer versions write the normalised total as ``input_tokens_total``.
+    Precedence: ``input_tokens_total`` > Anthropic add-back > raw ``prompt_tokens``.
+    """
+    other = _log_other(row)
+    prompt = _as_int(row.get("prompt_tokens"))
+    completion = _as_int(row.get("completion_tokens"))
+    cache_read = _as_int(other.get("cache_tokens"))
+    cache_write = _as_int(other.get("cache_write_tokens") or other.get("cache_creation_tokens"))
+    if _as_int(other.get("input_tokens_total")):
+        prompt = _as_int(other.get("input_tokens_total"))
+    elif other.get("usage_semantic") == "anthropic":
+        prompt += cache_read + cache_write
+    elif cache_read or cache_write:
+        # Unpriced or renamed marker: keep the raw count (adding it back could double count an
+        # OpenAI-style log) but leave a trace so a schema change does not go unnoticed.
+        log.debug("cache tokens without the anthropic marker (semantic=%r); input not adjusted",
+                  other.get("usage_semantic"))
+    return LogUsage(prompt, completion, cache_read, cache_write)
+
+
 def reconcile_task(db: Session, task: Task) -> None:
     consumed = [r for r in task_logs(task) if r.get("type") == LOG_TYPE_CONSUME]
+    usage = [parse_log(r) for r in consumed]
     task.billed_quota = sum(int(r.get("quota") or 0) for r in consumed)
-    task.billed_prompt_tokens = sum(int(r.get("prompt_tokens") or 0) for r in consumed)
-    task.billed_completion_tokens = sum(int(r.get("completion_tokens") or 0) for r in consumed)
+    task.billed_prompt_tokens = sum(u.input_tokens for u in usage)
+    task.billed_completion_tokens = sum(u.output_tokens for u in usage)
     task.billed_requests = len(consumed)
     task.billing_reconciled_at = utcnow()
     near_budget = task.billed_quota >= task.budget_quota * 0.98

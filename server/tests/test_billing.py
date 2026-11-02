@@ -113,6 +113,52 @@ def test_task_token_lifecycle_and_reconcile(env):
         assert billing.balance_quota(user) == 5_000_000 - 200_000
 
 
+def test_reconcile_adds_anthropic_cache_tokens(env):
+    """Anthropic logs keep cache read/write outside prompt_tokens; OpenAI logs already include them."""
+    from delegate import billing
+    from delegate.db import session_scope
+
+    with session_scope() as db:
+        user = _user(db)
+        billing.adjust(db, user, 5_000_000, kind="admin_grant", actor="admin:1")
+        task = _task(db, user)
+        key = billing.open_task_token(db, user, task)
+        env.consume(key, 50_000, prompt=2, completion=20,
+                    other={"usage_semantic": "anthropic", "cache_tokens": 1_000, "cache_write_tokens": 9_000})
+        env.consume(key, 50_000, prompt=3_000, completion=20,
+                    other={"usage_semantic": "openai", "cache_tokens": 1_000})
+        billing.close_task_token(db, task)
+        billing.reconcile_task(db, task)
+        assert task.billed_prompt_tokens == 2 + 1_000 + 9_000 + 3_000
+        assert task.billed_completion_tokens == 40
+
+
+def test_parse_log_handles_gateway_variants():
+    """Gateway logs differ per upstream protocol; broken payloads must never raise."""
+    from delegate import billing
+
+    def row(**kwargs):
+        base = {"prompt_tokens": 10, "completion_tokens": 5}
+        base.update(kwargs)
+        return base
+
+    assert billing.parse_log(row()) == billing.LogUsage(10, 5, 0, 0)
+    # Anthropic: prompt excludes cache reads/writes (cache_creation_tokens is the older name)
+    usage = billing.parse_log(row(other='{"usage_semantic":"anthropic","cache_tokens":4,"cache_creation_tokens":6}'))
+    assert (usage.input_tokens, usage.cache_read_tokens, usage.cache_write_tokens) == (20, 4, 6)
+    # OpenAI: prompt already contains the cached tokens, so nothing is added
+    usage = billing.parse_log(row(prompt_tokens=100, other='{"usage_semantic":"openai","cache_tokens":90}'))
+    assert usage.input_tokens == 100
+    # new-api's normalised total wins over any add-back
+    usage = billing.parse_log(row(other='{"usage_semantic":"anthropic","cache_tokens":4,"input_tokens_total":99}'))
+    assert usage.input_tokens == 99
+    # unparseable or hostile payloads degrade instead of breaking the page
+    assert billing.parse_log(row(other="not-json")).input_tokens == 10
+    assert billing.parse_log(row(other='{"cache_tokens":"1,000"}')).input_tokens == 10
+    usage = billing.parse_log(row(prompt_tokens="12", completion_tokens=None))
+    assert (usage.input_tokens, usage.output_tokens) == (12, 0)
+
+
 def test_budget_exhausted_reason(env):
     from delegate import billing
     from delegate.db import session_scope

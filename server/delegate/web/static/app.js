@@ -97,7 +97,8 @@ async function loadBilling(taskId) {
       el("td", {}, new Date(l.time * 1000).toLocaleString("zh-CN", { hour12: false })),
       el("td", {}, types[l.type] || l.type),
       el("td", { class: "mono" }, l.model || "-"),
-      el("td", { class: "num" }, (l.prompt_tokens || 0).toLocaleString()),
+      el("td", { class: "num" }, (l.input_tokens ?? l.prompt_tokens ?? 0).toLocaleString()),
+      el("td", { class: "num" }, `${(l.cache_read_tokens || 0).toLocaleString()} / ${(l.cache_write_tokens || 0).toLocaleString()}`),
       el("td", { class: "num" }, (l.completion_tokens || 0).toLocaleString()),
       el("td", { class: "num" }, `$${l.cost_usd.toFixed(6)}`),
       el("td", { class: "num" }, l.use_time != null ? `${l.use_time}s` : "-"),
@@ -105,10 +106,10 @@ async function loadBilling(taskId) {
     const sum = data.logs.filter((l) => l.type === 2).reduce((a, l) => a + l.cost_usd, 0);
     box.replaceChildren(el("table", {},
       el("thead", {}, el("tr", {}, el("th", {}, "时间"), el("th", {}, "类型"), el("th", {}, "模型"), el("th", { class: "num" }, "输入"),
-        el("th", { class: "num" }, "输出"), el("th", { class: "num" }, "费用"), el("th", { class: "num" }, "耗时"),
-        el("th", {}, "请求 ID"))),
+        el("th", { class: "num" }, "缓存 读/写"), el("th", { class: "num" }, "输出"), el("th", { class: "num" }, "费用"),
+        el("th", { class: "num" }, "耗时"), el("th", {}, "请求 ID"))),
       el("tbody", {}, ...rows)),
-      el("p", { class: "small muted" }, `${data.logs.length} 条记录，消费合计 $${sum.toFixed(6)}`));
+      el("p", { class: "small muted" }, `${data.logs.length} 条记录，消费合计 $${sum.toFixed(6)}；输入已含缓存读写，缓存列为其中拆分`));
     box.classList.remove("muted");
   } catch (e) {
     box.textContent = "无法读取网关日志";

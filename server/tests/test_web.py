@@ -90,6 +90,40 @@ def test_full_user_flow(client, env):
         assert expected in actions, expected
 
 
+def test_task_billing_reports_cache_inclusive_tokens(client, env):
+    """Gateway logs keep Anthropic cache tokens outside prompt_tokens; pages must show the total."""
+    from sqlalchemy import select
+
+    from delegate import billing
+    from delegate.db import session_scope
+    from delegate.models import Task, TaskStatus, User, utcnow
+
+    register(client)
+    key = make_key(client)
+    headers = {"Authorization": f"Bearer {key}"}
+    token = csrf_of(client, "/admin/users/1")
+    client.post("/admin/users/1/adjust", data={"csrf": token, "amount_usd": "5", "direction": "add"})
+    task_id = client.post("/api/v1/tasks", json={"task": "x"}, headers=headers).json()["id"]
+
+    with session_scope() as db:
+        user = db.scalar(select(User).where(User.email == "admin@example.com"))
+        task = db.get(Task, task_id)
+        task_key = billing.open_task_token(db, user, task)
+        env.consume(task_key, 10_000, prompt=2, completion=20,
+                    other={"usage_semantic": "anthropic", "cache_tokens": 100, "cache_write_tokens": 900})
+        billing.close_task_token(db, task)
+        billing.reconcile_task(db, task)
+        task.status, task.finished_at = TaskStatus.CANCELLED, utcnow()
+
+    logs = client.get(f"/tasks/{task_id}/billing").json()["logs"]
+    row = next(r for r in logs if r["type"] == 2)
+    assert (row["input_tokens"], row["completion_tokens"]) == (1002, 20)
+    assert (row["cache_read_tokens"], row["cache_write_tokens"]) == (100, 900)
+    assert "输入（含缓存）" in client.get("/billing").text
+    view = client.get(f"/api/v1/tasks/{task_id}", headers=headers).json()
+    assert view["billing"]["tokens"] == 1022
+
+
 def test_isolation_and_validation(client, env):
     register(client)
     key = make_key(client)
