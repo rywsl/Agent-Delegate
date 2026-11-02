@@ -1,0 +1,16 @@
+# One public origin: the web site at /, the MCP endpoint at /mcp.
+# DELEGATE_DOMAIN=":80" serves plain HTTP; a real domain name gets automatic HTTPS.
+{$DELEGATE_DOMAIN}
+
+@mcp path /mcp /mcp/*
+handle @mcp {
+	reverse_proxy mcp:8001 {
+		flush_interval -1
+	}
+}
+
+handle {
+	reverse_proxy web:8000 {
+		flush_interval -1
+	}
+}

@@ -1,0 +1,14 @@
+## Delegating work to the cloud agent (MCP server "delegate")
+
+Use `delegate_task` for self-contained work that can run unattended in a sandbox (long refactors,
+test fixing, data processing, research that produces files). The cloud agent cannot see this machine
+and cannot ask questions, so:
+
+1. Write a complete brief: goal, context, constraints, acceptance criteria, how to verify.
+2. Inputs: for a project, call `create_upload`, then run the printed command in the project root, e.g.
+   `git ls-files -co --exclude-standard -z | tar --null -T - -czf - | curl -fsS -T - '<upload_url>'`,
+   and pass the upload id to `delegate_task(upload_ids=[...])`. Never paste file contents into tool
+   arguments except for tiny snippets.
+3. While the result says the task is still running, call `wait_task(task_id=...)` again.
+4. Review the report, then apply the patch from the project root with the printed
+   `curl ... && git apply ...` command; fetch output files the same way.

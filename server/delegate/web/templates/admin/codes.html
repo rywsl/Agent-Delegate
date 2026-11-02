@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}充值码{% endblock %}
+{% block content %}
+<h1>充值码</h1>
+<div class="tabs">
+  <a href="/admin">概览</a><a href="/admin/users">用户</a><a href="/admin/tasks">全部任务</a>
+  <a href="/admin/codes" class="active">充值码</a><a href="/admin/audit">全局审计</a>
+</div>
+{% if codes %}
+<div class="key-once panel">
+  <strong>新生成的充值码（只显示这一次，本站只保存其哈希）：</strong>
+  <pre>{{ codes | join('\n') }}</pre>
+  <button class="secondary copy" data-copy="{{ codes | join('\n') }}">复制全部</button>
+</div>
+{% endif %}
+<div class="panel">
+  <table>
+    <thead><tr><th>ID</th><th>尾号</th><th class="num">金额</th><th>备注</th><th>创建</th><th>过期</th><th>使用情况</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr><td>{{ r.id }}</td><td class="mono">…{{ r.hint }}</td><td class="num">{{ fmt_usd(r.quota) }}</td><td class="small">{{ r.note }}</td>
+        <td class="small">{{ fmt_dt(r.created_at) }}<div class="muted mono">{{ r.created_by }}</div></td>
+        <td class="small">{{ fmt_dt(r.expires_at) if r.expires_at else '永久' }}</td>
+        <td class="small">{% if r.redeemed_by %}{{ redeemers[r.redeemed_by].email if r.redeemed_by in redeemers else r.redeemed_by }} · {{ fmt_dt(r.redeemed_at) }}{% else %}<span class="badge ok">未使用</span>{% endif %}</td></tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">暂无（在管理概览页生成）</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

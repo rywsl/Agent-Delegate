@@ -1,0 +1,40 @@
+[project]
+name = "delegate"
+version = "0.1.0"
+description = "Delegate tasks from a local agent to sandboxed cloud agents, billed per token through a new-api sidecar"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
+    "cryptography>=43",
+    "docker>=7.1",
+    "mcp>=1.12",
+    "markdown-it-py>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+delegate-web = "delegate.web.app:main"
+delegate-worker = "delegate.worker:main"
+delegate-mcp = "delegate_mcp.server:main"
+delegate-admin = "delegate.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["delegate", "delegate_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

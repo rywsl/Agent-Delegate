@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}登录{% endblock %}
+{% block content %}
+<div class="auth panel">
+  <h1>登录 Delegate</h1>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>邮箱</label><input type="email" name="email" value="{{ email or '' }}" required autofocus>
+    <label>密码</label><input type="password" name="password" required>
+    <div class="actions" style="margin-top:14px"><button>登录</button>
+      {% if settings.allow_registration %}<a href="/register">注册新账户</a>{% endif %}</div>
+  </form>
+</div>
+{% endblock %}

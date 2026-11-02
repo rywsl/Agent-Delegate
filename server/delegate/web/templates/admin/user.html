@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "_macros.html" import task_rows %}
+{% block title %}{{ target.email }}{% endblock %}
+{% block content %}
+<div class="between">
+  <h1>{{ target.email }}</h1>
+  <div class="actions">
+    {% if target.id != user.id %}
+    <form class="inline" method="post" action="/admin/users/{{ target.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="field" value="active"><button class="{{ 'danger' if target.is_active else '' }}">{{ '停用账户' if target.is_active else '启用账户' }}</button></form>
+    <form class="inline" method="post" action="/admin/users/{{ target.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="field" value="admin"><button class="secondary">{{ '取消管理员' if target.is_admin else '设为管理员' }}</button></form>
+    {% endif %}
+  </div>
+</div>
+<div class="row">
+  <div class="panel">
+    <h2>账户</h2>
+    <div class="kv">
+      <div>ID</div><div>{{ target.id }}</div>
+      <div>昵称</div><div>{{ target.display_name }}</div>
+      <div>状态</div><div>{{ '正常' if target.is_active else '停用' }}{{ ' · 管理员' if target.is_admin }}</div>
+      <div>注册</div><div>{{ fmt_dt(target.created_at) }}</div>
+      <div>最近登录</div><div>{{ fmt_dt(target.last_login_at) }}</div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>网关镜像账户</h2>
+    {% if mirror %}
+    <div class="kv">
+      <div>new-api 用户</div><div class="mono">#{{ mirror.id }} {{ mirror.username }}</div>
+      <div>分组</div><div>{{ mirror.group }}</div>
+      <div>余额</div><div><strong>{{ fmt_usd(mirror.quota) }}</strong></div>
+      <div>累计消费</div><div>{{ fmt_usd(mirror.used_quota) }}</div>
+      <div>请求次数</div><div>{{ fmt_int(mirror.request_count) }}</div>
+      <div>网关状态</div><div>{{ '启用' if mirror.status == 1 else '禁用' }}</div>
+    </div>
+    {% else %}<p class="muted">尚未创建（首次提交任务或在管理概览中批量创建时自动创建）。</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2>调整余额</h2>
+    <form method="post" action="/admin/users/{{ target.id }}/adjust">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>金额 (USD)</label><input type="number" name="amount_usd" step="0.01" min="0.01" required>
+      <label>方向</label><select name="direction"><option value="add">充值</option><option value="subtract">扣减</option></select>
+      <label>备注</label><input type="text" name="note">
+      <div style="margin-top:12px"><button>提交</button></div>
+    </form>
+    <p class="small muted">通过网关的原子 add_quota 操作执行，不会与进行中的消费产生竞态。</p>
+  </div>
+</div>
+<div class="panel"><h2>最近任务</h2>{{ task_rows(tasks) }}</div>
+<div class="panel">
+  <h2>余额变动</h2>
+  <table><thead><tr><th>时间</th><th>类型</th><th class="num">金额</th><th>操作者</th><th>备注</th><th>状态</th></tr></thead><tbody>
+  {% for e in ledger %}<tr><td class="small">{{ fmt_dt(e.ts) }}</td><td>{{ e.kind }}</td><td class="num">{{ fmt_usd(e.quota_delta) }}</td>
+    <td class="mono small">{{ e.actor }}</td><td class="small">{{ e.note }}</td><td><span class="badge {{ e.status }}">{{ e.status }}</span></td></tr>
+  {% else %}<tr><td colspan="6" class="muted">暂无</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+<div class="panel">
+  <h2>审计记录</h2>
+  <table><thead><tr><th>时间</th><th>操作</th><th>对象</th><th>操作者</th><th>IP</th><th>详情</th></tr></thead><tbody>
+  {% for a in trail %}<tr><td class="small">{{ fmt_dt(a.ts) }}</td><td class="mono small">{{ a.action }}</td><td class="mono small">{{ a.target or '-' }}</td>
+    <td class="mono small">{{ a.actor }}</td><td class="small">{{ a.ip or '-' }}</td><td class="mono small">{{ a.detail | tojson }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

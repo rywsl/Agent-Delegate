@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}新建任务{% endblock %}
+{% block content %}
+<h1>新建任务</h1>
+<p class="muted">通常由本地 agent 通过 MCP 提交；这里可以直接在网页上提交一个任务。</p>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form class="panel" method="post" action="/tasks/new" enctype="multipart/form-data">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>任务描述（需完整、自洽：云端 agent 无法向你提问）</label>
+  <textarea name="task" required>{{ form.task if form else '' }}</textarea>
+  <label>标题（可选）</label><input type="text" name="title" value="{{ form.title if form else '' }}">
+  <div class="row">
+    <div><label>Git 仓库 URL（可选）</label><input type="url" name="repo_url" placeholder="https://github.com/org/repo.git" value="{{ form.repo_url if form else '' }}"></div>
+    <div><label>分支 / 提交（可选）</label><input type="text" name="repo_ref" value="{{ form.repo_ref if form else '' }}"></div>
+  </div>
+  <label>输入文件（可选：.zip / .tar / .tar.gz 会解压到工作区，其他文件按原名放入工作区）</label>
+  <input type="file" name="archive">
+  <p class="muted small">执行配置：{{ options.agent }} · {{ options.model }} · 预算 {{ fmt_usd(options.budget_quota) }} · 超时 {{ options.timeout_s // 60 }} 分钟（在<a href="/settings">设置</a>中修改）</p>
+  <button>提交</button>
+</form>
+{% endblock %}

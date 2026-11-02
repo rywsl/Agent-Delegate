@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pager %}
+{% block title %}审计日志{% endblock %}
+{% block content %}
+<h1>{{ '全局审计日志' if admin_view else '审计日志' }}</h1>
+{% if admin_view %}
+<form class="actions" method="get" action="/admin/audit" style="margin-bottom:12px">
+  <input type="text" name="action" value="{{ action or '' }}" placeholder="按操作前缀过滤，如 task. / billing. / auth." style="max-width:360px">
+  <button class="secondary">过滤</button>
+</form>
+{% endif %}
+<div class="panel">
+  <table>
+    <thead><tr><th>时间</th>{% if admin_view %}<th>用户</th>{% endif %}<th>操作</th><th>对象</th><th>操作者</th><th>IP / 客户端</th><th>详情</th></tr></thead>
+    <tbody>
+    {% for a in rows %}
+      <tr>
+        <td class="small">{{ fmt_dt(a.ts) }}</td>
+        {% if admin_view %}<td class="small">{% if a.user_id %}<a href="/admin/users/{{ a.user_id }}">#{{ a.user_id }}</a>{% else %}-{% endif %}</td>{% endif %}
+        <td class="mono small">{{ a.action }}</td>
+        <td class="mono small">{% if a.target and a.target.startswith('t_') %}<a href="/tasks/{{ a.target }}">{{ a.target }}</a>{% else %}{{ a.target or '-' }}{% endif %}</td>
+        <td class="mono small">{{ a.actor }}</td>
+        <td class="small">{{ a.ip or '-' }}<div class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ a.user_agent or '' }}">{{ a.user_agent or '' }}</div></td>
+        <td class="mono small" style="max-width:420px;overflow-wrap:anywhere">{{ a.detail | tojson }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">暂无记录</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {{ pager(page, pages, base_url, ('&action=' ~ action) if action else '') }}
+</div>
+{% endblock %}

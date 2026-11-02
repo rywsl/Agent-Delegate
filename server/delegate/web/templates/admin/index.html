@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}管理{% endblock %}
+{% block content %}
+<h1>管理</h1>
+<div class="tabs">
+  <a href="/admin" class="active">概览</a><a href="/admin/users">用户</a><a href="/admin/tasks">全部任务</a>
+  <a href="/admin/codes">充值码</a><a href="/admin/audit">全局审计</a>
+</div>
+<div class="row">
+  <div class="panel"><div class="stat-label">计费网关 (new-api)</div>
+    <div><span class="badge {{ 'ok' if newapi_ok else 'err' }}">{{ '正常' if newapi_ok else '异常' }}</span></div>
+    <div class="small muted" style="margin-top:6px">{{ newapi_msg }}</div></div>
+  <div class="panel"><div class="stat-label">沙箱 (Docker)</div>
+    <div><span class="badge {{ 'ok' if docker_ok and docker_msg == 'ok' else 'err' }}">{{ '正常' if docker_ok and docker_msg == 'ok' else '异常' }}</span></div>
+    <div class="small muted" style="margin-top:6px">{{ docker_msg }}</div></div>
+  <div class="panel"><div class="stat-label">用户</div><div class="stat">{{ users }}</div>
+    {% if unmirrored %}<div class="small" style="color:var(--warn)">{{ unmirrored }} 个用户尚无网关镜像账户</div>
+    <form method="post" action="/admin/sync-mirrors"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">立即创建</button></form>{% endif %}</div>
+  <div class="panel"><div class="stat-label">累计计费</div><div class="stat">{{ fmt_usd(billed_total) }}</div></div>
+</div>
+<div class="panel">
+  <h2>任务状态</h2>
+  <div class="actions">
+  {% for s in ['queued','preparing','running','succeeded','failed','cancelled','timeout'] %}
+    <a href="/admin/tasks?status={{ s }}"><span class="badge {{ s }}">{{ status_label(s) }} {{ counts.get(s, 0) }}</span></a>
+  {% endfor %}
+  </div>
+</div>
+<div class="panel">
+  <h2>生成充值码</h2>
+  <form class="actions" method="post" action="/admin/codes">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label style="margin:0">金额 (USD)</label><input type="number" name="amount_usd" step="0.01" min="0.01" required style="max-width:120px">
+    <label style="margin:0">数量</label><input type="number" name="count" value="1" min="1" max="100" style="max-width:90px">
+    <label style="margin:0">有效期 (天, 0=永久)</label><input type="number" name="valid_days" value="0" min="0" style="max-width:90px">
+    <input type="text" name="note" placeholder="备注" style="max-width:200px">
+    <button>生成</button>
+  </form>
+</div>
+<p class="muted small">上游渠道（模型供应商密钥）、模型定价与分组倍率在 new-api 后台配置；new-api 不对公网暴露，仅管理员可通过内网端口访问。</p>
+{% endblock %}

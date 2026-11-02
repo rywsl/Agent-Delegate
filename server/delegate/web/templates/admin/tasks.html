@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_macros.html" import task_rows, pager %}
+{% block title %}全部任务{% endblock %}
+{% block content %}
+<h1>全部任务</h1>
+<div class="tabs">
+  <a href="/admin">概览</a><a href="/admin/users">用户</a><a href="/admin/tasks" class="active">全部任务</a>
+  <a href="/admin/codes">充值码</a><a href="/admin/audit">全局审计</a>
+</div>
+<div class="tabs">
+  <a href="/admin/tasks" class="{{ 'active' if not status }}">全部</a>
+  {% for s in ['queued','preparing','running','succeeded','failed','cancelled','timeout'] %}
+  <a href="/admin/tasks?status={{ s }}" class="{{ 'active' if status == s }}">{{ status_label(s) }}</a>
+  {% endfor %}
+</div>
+<div class="panel">
+  {{ task_rows(rows, owners) }}
+  {{ pager(page, pages, '/admin/tasks', '&status=' ~ status) }}
+</div>
+{% endblock %}

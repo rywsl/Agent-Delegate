@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}">
+  <title>{% block title %}Delegate{% endblock %} · Delegate</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% if user %}
+<header class="top">
+  <div class="inner">
+    <a class="brand" href="/dashboard">Delegate</a>
+    {% set path = request.url.path %}
+    <nav>
+      <a href="/dashboard" class="{{ 'active' if path == '/dashboard' }}">控制台</a>
+      <a href="/tasks" class="{{ 'active' if path.startswith('/tasks') }}">任务</a>
+      <a href="/billing" class="{{ 'active' if path.startswith('/billing') }}">账单</a>
+      <a href="/keys" class="{{ 'active' if path.startswith('/keys') }}">API 密钥</a>
+      <a href="/audit" class="{{ 'active' if path == '/audit' }}">审计日志</a>
+      <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">设置</a>
+      {% if user.is_admin %}<a href="/admin" class="{{ 'active' if path.startswith('/admin') }}">管理</a>{% endif %}
+    </nav>
+    <div class="who">
+      <span>{{ user.display_name or user.email }}</span>
+      <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>退出</button></form>
+    </div>
+  </div>
+</header>
+{% endif %}
+<main>
+  {% for f in flashes %}<div class="flash {{ f.level }}">{{ f.msg }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

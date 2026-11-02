@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block content %}
+<h1>用户</h1>
+<div class="tabs">
+  <a href="/admin">概览</a><a href="/admin/users" class="active">用户</a><a href="/admin/tasks">全部任务</a>
+  <a href="/admin/codes">充值码</a><a href="/admin/audit">全局审计</a>
+</div>
+<form class="actions" method="get" action="/admin/users" style="margin-bottom:12px">
+  <input type="text" name="q" value="{{ q }}" placeholder="邮箱 / 昵称" style="max-width:320px"><button class="secondary">搜索</button>
+</form>
+<div class="panel">
+  <table>
+    <thead><tr><th>ID</th><th>邮箱</th><th>昵称</th><th>镜像账户</th><th class="num">任务数</th><th class="num">累计计费</th><th>状态</th><th>注册时间</th></tr></thead>
+    <tbody>
+    {% for u in rows %}
+      {% set st = stats.get(u.id, (0, 0)) %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td><a href="/admin/users/{{ u.id }}">{{ u.email }}</a>{% if u.is_admin %} <span class="badge running">管理员</span>{% endif %}</td>
+        <td>{{ u.display_name }}</td>
+        <td class="mono small">{% if u.newapi_user_id %}#{{ u.newapi_user_id }} {{ u.newapi_username }}{% else %}<span class="badge warn">未创建</span>{% endif %}</td>
+        <td class="num">{{ st[0] }}</td><td class="num">{{ fmt_usd(st[1]) }}</td>
+        <td>{% if u.is_active %}<span class="badge ok">正常</span>{% else %}<span class="badge err">停用</span>{% endif %}</td>
+        <td class="small">{{ fmt_dt(u.created_at) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,141 @@
+# Delegate: local agents hand tasks to sandboxed cloud agents, billed per token through new-api.
+#
+#   docker compose --profile build build      # builds the server image and the sandbox image
+#   docker compose up -d
+#
+# Networks
+#   backend   web, worker, mcp, postgres, new-api        (never reachable from sandboxes)
+#   sandbox   new-api + the per-task sandbox containers  (internet access for the agents)
+# new-api is only published on 127.0.0.1 for the operator (channel / pricing configuration).
+
+x-server: &server
+  build: ./server
+  image: delegate-server:latest
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DELEGATE_DATABASE_URL: postgresql+psycopg://delegate:${POSTGRES_PASSWORD}@postgres:5432/delegate
+    NEWAPI_BASE_URL: http://new-api:3000
+    SANDBOX_NEWAPI_URL: http://new-api:3000
+    SANDBOX_NETWORK: delegate_sandbox
+  networks: [backend]
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DELEGATE_DOMAIN: ${DELEGATE_DOMAIN:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [web, mcp]
+    networks: [backend]
+
+  web:
+    <<: *server
+    command: ["delegate-web"]
+    volumes: [delegate-data:/data]
+    depends_on:
+      postgres: { condition: service_healthy }
+      new-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *server
+    command: ["delegate-worker"]
+    # Needs the Docker socket to start sandbox containers (equivalent to root on the host:
+    # run the stack on a dedicated machine or VM).
+    user: root
+    volumes:
+      - delegate-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    stop_grace_period: 60s
+    depends_on:
+      web: { condition: service_healthy }
+
+  mcp:
+    # Deliberately no env_file: the gateway holds no secrets; every call carries the caller's API key.
+    build: ./server
+    image: delegate-server:latest
+    restart: unless-stopped
+    command: ["delegate-mcp"]
+    environment:
+      DELEGATE_API_URL: http://web:8000
+      DELEGATE_MCP_DEFAULT_WAIT: ${DELEGATE_MCP_DEFAULT_WAIT:-100}
+    networks: [backend]
+    depends_on:
+      web: { condition: service_healthy }
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: delegate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: delegate
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./deploy/postgres-init.sql:/docker-entrypoint-initdb.d/10-newapi.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U delegate"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [backend]
+
+  new-api:
+    image: calciumion/new-api:${NEWAPI_VERSION:-latest}
+    restart: unless-stopped
+    command: ["--log-dir", "/app/logs"]
+    environment:
+      SQL_DSN: postgresql://delegate:${POSTGRES_PASSWORD}@postgres:5432/newapi
+      SESSION_SECRET: ${NEWAPI_SESSION_SECRET}
+      TZ: ${TZ:-Asia/Shanghai}
+      ERROR_LOG_ENABLED: "true"
+      BATCH_UPDATE_ENABLED: "false"
+      # Only the web site and the sandboxes talk to new-api; every request comes from a handful of
+      # internal IPs, so the per-IP limits for the public console would throttle normal operation.
+      CRITICAL_RATE_LIMIT_ENABLE: "false"
+      GLOBAL_API_RATE_LIMIT_ENABLE: "false"
+      GLOBAL_WEB_RATE_LIMIT_ENABLE: "false"
+      SEARCH_RATE_LIMIT_ENABLE: "false"
+    volumes:
+      - newapi-data:/data
+      - newapi-logs:/app/logs
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -q '\"success\":\\s*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      backend: {}
+      sandbox:
+        aliases: [new-api]
+
+  # Build-only: the image every task runs in. `docker compose --profile build build sandbox-image`
+  sandbox-image:
+    build: ./sandbox
+    image: delegate-sandbox:latest
+    profiles: ["build"]
+    entrypoint: ["true"]
+
+networks:
+  backend: {}
+  sandbox:
+    name: delegate_sandbox
+
+volumes:
+  delegate-data: {}
+  pg-data: {}
+  newapi-data: {}
+  newapi-logs: {}
+  caddy-data: {}

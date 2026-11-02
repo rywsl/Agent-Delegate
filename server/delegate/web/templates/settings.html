@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block content %}
+<h1>设置</h1>
+<div class="row">
+<form class="panel" method="post" action="/settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>任务执行配置</h2>
+  <p class="muted small">本地 agent 无法修改这些配置——它只能提交任务。</p>
+  <label>昵称</label><input type="text" name="display_name" value="{{ user.display_name }}">
+  <label>云端 Agent</label>
+  <select name="agent" id="agent">
+    {% for a in settings.agents %}<option value="{{ a }}" {{ 'selected' if options.agent == a }}>{{ {'claude': 'Claude Code', 'codex': 'Codex'}.get(a, a) }}</option>{% endfor %}
+  </select>
+  <label>模型</label>
+  <select name="model" id="model">
+    {% for a in settings.agents %}{% for m in settings.models_for(a) %}
+      <option value="{{ m }}" data-agent="{{ a }}" {{ 'selected' if options.model == m and options.agent == a }}>{{ m }}</option>
+    {% endfor %}{% endfor %}
+  </select>
+  <label>单任务预算（USD，上限 {{ settings.max_budget_usd }}）</label>
+  <input type="number" name="budget_usd" step="0.01" min="0.01" max="{{ settings.max_budget_usd }}" value="{{ '%.2f' % (options.budget_quota / settings.newapi_quota_per_unit) }}">
+  <label>超时（分钟，上限 {{ settings.max_timeout_s // 60 }}）</label>
+  <input type="number" name="timeout_min" min="1" max="{{ settings.max_timeout_s // 60 }}" value="{{ options.timeout_s // 60 }}">
+  <div style="margin-top:14px"><button>保存</button></div>
+</form>
+
+<form class="panel" method="post" action="/settings/password">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>修改密码</h2>
+  <label>当前密码</label><input type="password" name="current" required>
+  <label>新密码</label><input type="password" name="new" minlength="8" required>
+  <div style="margin-top:14px"><button>修改</button></div>
+</form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    const agent = document.getElementById("agent"), model = document.getElementById("model");
+    function sync() {
+      let firstVisible = null;
+      for (const opt of model.options) {
+        opt.hidden = opt.dataset.agent !== agent.value;
+        if (!opt.hidden && !firstVisible) firstVisible = opt;
+      }
+      if (model.selectedOptions[0] && model.selectedOptions[0].hidden && firstVisible) firstVisible.selected = true;
+    }
+    agent.addEventListener("change", sync); sync();
+  })();
+</script>
+{% endblock %}

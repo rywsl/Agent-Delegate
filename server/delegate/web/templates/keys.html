@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}API 密钥{% endblock %}
+{% block content %}
+<h1>API 密钥</h1>
+{% if new_key %}
+<div class="key-once panel">
+  <strong>新密钥（只显示这一次，请立即保存）：</strong>
+  <pre>{{ new_key }}</pre>
+  <p>在本地 Claude Code 中接入：</p>
+  <pre>claude mcp add --transport http delegate {{ settings.mcp_public_url }} --header "Authorization: Bearer {{ new_key }}"</pre>
+  <button class="secondary copy" data-copy='claude mcp add --transport http delegate {{ settings.mcp_public_url }} --header "Authorization: Bearer {{ new_key }}"'>复制命令</button>
+</div>
+{% endif %}
+
+<div class="panel">
+  <form class="actions" method="post" action="/keys">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="text" name="name" placeholder="名称，例如：我的笔记本" style="max-width:320px" required>
+    <button>创建密钥</button>
+  </form>
+</div>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>名称</th><th>前缀</th><th>创建时间</th><th>最近使用</th><th>状态</th><th></th></tr></thead>
+    <tbody>
+    {% for k in keys %}
+      <tr>
+        <td>{{ k.name }}</td><td class="mono">{{ k.prefix }}…</td><td>{{ fmt_dt(k.created_at) }}</td>
+        <td>{{ fmt_dt(k.last_used_at) }}{% if k.last_used_ip %}<div class="muted small">{{ k.last_used_ip }}</div>{% endif %}</td>
+        <td>{% if k.active %}<span class="badge ok">有效</span>{% else %}<span class="badge err">已吊销 {{ fmt_dt(k.revoked_at) }}</span>{% endif %}</td>
+        <td>{% if k.active %}
+          <form class="inline" method="post" action="/keys/{{ k.id }}/revoke" onsubmit="return confirm('吊销后使用该密钥的本地 agent 将无法再外派任务，确定？')">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">吊销</button></form>
+        {% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">还没有密钥</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>本地 agent 能做什么</h2>
+  <ul>
+    <li><code>delegate_task</code>：提交一个完整、自洽的任务并等待结果（云端 agent 自主执行，不能被逐步操控）。</li>
+    <li><code>create_upload</code>：获取一次性上传地址，用 curl 上传项目目录 / 大文件，避免把文件内容塞进工具参数。</li>
+    <li><code>wait_task</code> / <code>cancel_task</code> / <code>list_tasks</code>：等待、取消、列出任务。</li>
+    <li>返回内容仅包含：结果报告、工作区 patch、/outputs 下的输出文件（均为限时下载链接）和费用。执行过程细节只在本站展示。</li>
+  </ul>
+</div>
+{% endblock %}

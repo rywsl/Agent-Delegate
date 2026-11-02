@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}注册{% endblock %}
+{% block content %}
+<div class="auth panel">
+  <h1>注册</h1>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post" action="/register">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>邮箱</label><input type="email" name="email" value="{{ email or '' }}" required autofocus>
+    <label>昵称</label><input type="text" name="display_name" value="{{ display_name or '' }}">
+    <label>密码（至少 8 位）</label><input type="password" name="password" minlength="8" required>
+    <div class="actions" style="margin-top:14px"><button>注册</button><a href="/login">已有账户？登录</a></div>
+  </form>
+</div>
+{% endblock %}

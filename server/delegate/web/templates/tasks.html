@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_macros.html" import task_rows, pager %}
+{% block title %}任务{% endblock %}
+{% block content %}
+<div class="between"><h1>任务</h1><a class="btn" href="/tasks/new">新建任务</a></div>
+<div class="tabs">
+  <a href="/tasks" class="{{ 'active' if not status }}">全部</a>
+  {% for s in ['queued','running','succeeded','failed','cancelled','timeout'] %}
+  <a href="/tasks?status={{ s }}" class="{{ 'active' if status == s }}">{{ status_label(s) }}</a>
+  {% endfor %}
+</div>
+<div class="panel">
+  {{ task_rows(tasks) }}
+  {{ pager(page, pages, '/tasks', '&status=' ~ status) }}
+</div>
+<p class="muted small">* 费用尚未与网关日志完成对账。</p>
+{% endblock %}

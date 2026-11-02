@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "delegate": {
+      "type": "http",
+      "url": "https://delegate.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DELEGATE_API_KEY}"
+      }
+    }
+  }
+}
