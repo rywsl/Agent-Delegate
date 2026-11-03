@@ -1,5 +1,6 @@
 .env
 data/
+.build-tmp/
 **/.venv/
 **/__pycache__/
 **/.pytest_cache/
