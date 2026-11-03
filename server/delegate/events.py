@@ -75,11 +75,7 @@ def _describe_tool_input(name: str, args: Any) -> str:
 
 @dataclass
 class UsageTracker:
-    """Token usage and the final answer as reported by the agent CLI itself.
-
-    Billing never relies on these numbers (new-api's logs are authoritative); they are kept to
-    cross-check and to show per-turn detail in the audit view.
-    """
+    """Token usage and the final answer reported by the selected SDK or harness."""
 
     agent: str = ""
     input_tokens: int = 0
@@ -142,7 +138,7 @@ class Normalizer:
             event = envelope.get("event")
             if not isinstance(event, dict):
                 return [NormEvent("log", clip(event), {"event": shrink(event)})]
-            if agent == "claude":
+            if agent in ("claude", "anthropic", "openai", "gemini"):
                 return self._claude(event)
             if agent == "codex":
                 return self._codex(event)

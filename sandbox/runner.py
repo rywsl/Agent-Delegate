@@ -13,7 +13,7 @@ Inputs (written by the worker before the container starts):
     /task/spec.json      task specification (no platform secrets)
     /task/files/...      small inline files to place into the workspace
     /task/uploads/<id>   uploaded files / archives (tar, tar.gz, zip), unpacked here, inside the sandbox
-    env DELEGATE_GATEWAY_KEY   per-task new-api token, budget-limited, revoked after the task
+    env DELEGATE_LLM_API_KEY   selected provider credential, never written to the task specification
 Outputs:
     /out/changes.patch   binary git diff of everything the agent changed in /workspace
     /out/outputs.tar.gz  deliverables the agent put into /outputs
@@ -270,138 +270,22 @@ def collect_patch(baseline: str) -> dict:
     }
 
 
-# --------------------------------------------------------------------------- agents
-def claude_command(spec: dict) -> tuple[list[str], dict, str]:
-    cmd = [
-        "claude",
-        "-p",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--model", spec["model"],
-        "--max-turns", str(spec["max_turns"]),
-        "--dangerously-skip-permissions",
-        "--append-system-prompt", spec["system_prompt"],
-        # WebFetch's domain preflight would otherwise call api.anthropic.com directly.
-        "--settings", json.dumps({"skipWebFetchPreflight": True}),
-    ]
-    env = {
-        # Bearer auth against the gateway; the per-task key is the only credential in the sandbox.
-        "ANTHROPIC_BASE_URL": spec["gateway_url"],
-        "ANTHROPIC_AUTH_TOKEN": os.environ["DELEGATE_GATEWAY_KEY"],
-        "ANTHROPIC_MODEL": spec["model"],
-        # Background work and subagents must use models the gateway actually serves.
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": spec.get("small_model") or spec["model"],
-        "CLAUDE_CODE_SUBAGENT_MODEL": spec["model"],
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        "DISABLE_TELEMETRY": "1",
-        "DISABLE_AUTOUPDATER": "1",
-        "DISABLE_ERROR_REPORTING": "1",
-        "IS_SANDBOX": "1",
-    }
-    return cmd, env, spec["prompt"]
-
-
-def codex_command(spec: dict) -> tuple[list[str], dict, str]:
-    codex_home = Path(os.environ.get("HOME", "/home/agent")) / ".codex"
-    codex_home.mkdir(parents=True, exist_ok=True)
-    (codex_home / "config.toml").write_text(
-        "\n".join(
-            [
-                f"model = {json.dumps(spec['model'])}",
-                'model_provider = "delegate"',
-                'approval_policy = "never"',
-                'sandbox_mode = "danger-full-access"',
-                "check_for_update_on_startup = false",
-                "",
-                "[analytics]",
-                "enabled = false",
-                "",
-                "[feedback]",
-                "enabled = false",
-                "",
-                "[otel]",
-                'metrics_exporter = "none"',
-                "",
-                "[history]",
-                'persistence = "none"',
-                "",
-                "[model_providers.delegate]",
-                'name = "delegate"',
-                f"base_url = {json.dumps(spec['gateway_url'] + '/v1')}",
-                'env_key = "DELEGATE_GATEWAY_KEY"',
-                'wire_api = "responses"',
-                "",
-            ]
-        )
-    )
-    cmd = [
-        "codex",
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        # The container is the sandbox; codex's own bubblewrap sandbox cannot run inside Docker.
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--model", spec["model"],
-        "-C", str(WORKSPACE),
-        "-",
-    ]
-    # codex has no separate system-prompt flag for exec; prepend the delegation contract.
-    prompt = spec["system_prompt"] + "\n\n---\n\nTASK:\n" + spec["prompt"]
-    return cmd, {"CODEX_HOME": str(codex_home)}, prompt
-
-
+# --------------------------------------------------------------------------- agent
 def run_agent(spec: dict) -> int:
-    global _child
-    agent = spec["agent"]
-    builders = {"claude": claude_command, "codex": codex_command}
-    if agent not in builders:
-        phase("error", f"unknown agent {agent!r}")
-        return 2
-    cmd, extra_env, prompt = builders[agent](spec)
-    env = {**os.environ, **extra_env}
-    phase("agent", f"starting {agent} ({spec['model']})")
-    _child = subprocess.Popen(
-        cmd,
-        cwd=WORKSPACE,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
+    api_key = os.environ["DELEGATE_LLM_API_KEY"]
+    if spec.get("harness", "sdk") != "sdk":
+        from harness import run_harness
+
+        return run_harness(spec, api_key, WORKSPACE, emit, _stop_requested.is_set)
+
+    from agent import SDKAgent
+
+    phase("agent", f"starting {spec['provider']} ({spec['model']})")
+    agent = SDKAgent(
+        spec=spec, api_key=api_key, workspace=WORKSPACE, outputs=OUTPUTS,
+        emit=emit, should_stop=_stop_requested.is_set,
     )
-
-    def pump_stderr() -> None:
-        assert _child and _child.stderr
-        for line in _child.stderr:
-            line = line.rstrip("\n")
-            if line:
-                emit({"t": "stderr", "line": line})
-
-    stderr_thread = threading.Thread(target=pump_stderr, daemon=True)
-    stderr_thread.start()
-    try:
-        assert _child.stdin
-        _child.stdin.write(prompt)
-        _child.stdin.close()
-    except BrokenPipeError:
-        pass
-    assert _child.stdout
-    for line in _child.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            emit({"t": "stderr", "line": line})
-            continue
-        emit({"t": "agent", "agent": agent, "event": event})
-    code = _child.wait()
-    stderr_thread.join(timeout=5)
-    return code
+    return agent.run()
 
 
 def main() -> int:

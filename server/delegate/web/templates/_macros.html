@@ -15,8 +15,8 @@
 {% macro task_rows(tasks, owners=None) -%}
 <table>
   <thead><tr>
-    <th>任务</th>{% if owners is not none %}<th>用户</th>{% endif %}<th>状态</th><th>Agent / 模型</th>
-    <th>来源</th><th>创建时间</th><th class="num">耗时</th><th class="num">费用</th>
+    <th>任务</th>{% if owners is not none %}<th>用户</th>{% endif %}<th>状态</th><th>提供商 / 模型</th>
+    <th>沙箱 / Harness</th><th>来源</th><th>创建时间</th><th class="num">耗时</th>
   </tr></thead>
   <tbody>
   {% for t in tasks %}
@@ -25,10 +25,10 @@
       {% if owners is not none %}<td>{{ owners[t.user_id].email if t.user_id in owners else t.user_id }}</td>{% endif %}
       <td>{{ badge(t.status) }}</td>
       <td>{{ t.agent }}<div class="muted small">{{ t.model }}</div></td>
+      <td>{{ t.sandbox }}<div class="muted small">{{ t.harness }}</div></td>
       <td>{{ t.source }}</td>
       <td>{{ fmt_dt(t.created_at) }}</td>
       <td class="num">{{ fmt_duration(t.duration_s) }}</td>
-      <td class="num">{{ fmt_usd(t.billed_quota) }}{% if t.status in ('succeeded','failed','cancelled','timeout') and not t.billing_reconciled_at %}<span class="muted" title="待与网关日志对账">*</span>{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="8" class="muted">暂无任务</td></tr>

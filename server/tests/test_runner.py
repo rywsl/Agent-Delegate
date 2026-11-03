@@ -117,13 +117,12 @@ def test_patch_and_outputs_roundtrip(runner, tmp_path):
     assert runner.collect_outputs(3)["count"] == 0  # over the limit: nothing returned
 
 
-def test_claude_command_has_no_secret_in_argv(runner, monkeypatch):
-    monkeypatch.setenv("DELEGATE_GATEWAY_KEY", "sk-secret")
-    cmd, env, prompt = runner.claude_command({
-        "model": "claude-sonnet-5-5", "max_turns": 50, "system_prompt": "SYS", "prompt": "do it",
-        "gateway_url": "http://new-api:3000",
-    })
-    assert "sk-secret" not in json.dumps(cmd)
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-secret" and env["ANTHROPIC_BASE_URL"] == "http://new-api:3000"
-    assert cmd[cmd.index("--output-format") + 1] == "stream-json" and "--verbose" in cmd
-    assert prompt == "do it"
+def test_sdk_harness_needs_no_external_command(runner):
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "sandbox" / "harness.py"
+    spec = importlib.util.spec_from_file_location("sandbox_harness", path)
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+    assert "sdk" not in harness.DEFAULT_COMMANDS
+    assert {"claude-code", "codex", "gemini", "grok", "pi", "deepseek"} <= set(harness.DEFAULT_COMMANDS)

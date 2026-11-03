@@ -8,9 +8,9 @@
   <h2>任务执行配置</h2>
   <p class="muted small">本地 agent 无法修改这些配置——它只能提交任务。</p>
   <label>昵称</label><input type="text" name="display_name" value="{{ user.display_name }}">
-  <label>云端 Agent</label>
+  <label>模型提供商</label>
   <select name="agent" id="agent">
-    {% for a in settings.agents %}<option value="{{ a }}" {{ 'selected' if options.agent == a }}>{{ {'claude': 'Claude Code', 'codex': 'Codex'}.get(a, a) }}</option>{% endfor %}
+    {% for a in settings.agents %}<option value="{{ a }}" {{ 'selected' if options.agent == a }}>{{ {'anthropic': 'Anthropic', 'openai': 'OpenAI', 'gemini': 'Gemini'}.get(a, a) }}</option>{% endfor %}
   </select>
   <label>模型</label>
   <select name="model" id="model">
@@ -18,8 +18,15 @@
       <option value="{{ m }}" data-agent="{{ a }}" {{ 'selected' if options.model == m and options.agent == a }}>{{ m }}</option>
     {% endfor %}{% endfor %}
   </select>
-  <label>单任务预算（USD，上限 {{ settings.max_budget_usd }}）</label>
-  <input type="number" name="budget_usd" step="0.01" min="0.01" max="{{ settings.max_budget_usd }}" value="{{ '%.2f' % (options.budget_quota / settings.newapi_quota_per_unit) }}">
+  <label>沙箱</label>
+  <select name="sandbox">
+    {% for s in settings.sandboxes %}<option value="{{ s }}" {{ 'selected' if options.sandbox == s }}>{{ s }}{{ '（默认）' if s == settings.default_sandbox }}</option>{% endfor %}
+  </select>
+  <label>Harness</label>
+  <select name="harness">
+    {% for h in settings.harnesses %}<option value="{{ h }}" {{ 'selected' if options.harness == h }}>{{ h }}{{ '（默认，无需外部 CLI）' if h == 'sdk' }}</option>{% endfor %}
+  </select>
+  <p class="muted small">外部 harness 需要对应的按需构建镜像；默认 sdk harness 直接使用官方 Python SDK。</p>
   <label>超时（分钟，上限 {{ settings.max_timeout_s // 60 }}）</label>
   <input type="number" name="timeout_min" min="1" max="{{ settings.max_timeout_s // 60 }}" value="{{ options.timeout_s // 60 }}">
   <div style="margin-top:14px"><button>保存</button></div>

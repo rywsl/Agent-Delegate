@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}模型提供商{% endblock %}
+{% block content %}
+<h1>模型提供商</h1>
+<div class="tabs"><a href="/admin">概览</a><a href="/admin/providers" class="active">模型提供商</a><a href="/admin/users">用户</a><a href="/admin/tasks">全部任务</a><a href="/admin/audit">全局审计</a></div>
+<p class="muted">Base URL 留空使用官方默认地址；也可填写兼容服务的地址。API Key 留空表示保留现有配置。</p>
+{% for row in rows %}
+<form class="panel" method="post" action="/admin/providers/{{ row.name }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="between"><h2>{{ {'anthropic':'Anthropic','openai':'OpenAI','gemini':'Gemini'}[row.name] }}</h2><span class="badge {{ 'ok' if row.configured else 'warn' }}">{{ row.key_source }}</span></div>
+  <label>Base URL</label><input type="url" name="base_url" value="{{ row.config.base_url if row.config else '' }}" placeholder="{{ row.base_url }}">
+  <label>API Key</label><input type="password" name="api_key" autocomplete="new-password" placeholder="留空保留现有密钥">
+  <label><input type="checkbox" name="enabled" {{ 'checked' if not row.config or row.config.enabled }}> 启用此提供商</label>
+  {% if row.config and row.config.api_key_enc %}<label><input type="checkbox" name="clear_api_key"> 清除后台保存的密钥（可回退到环境变量）</label>{% endif %}
+  <div><button>保存 {{ row.name }}</button></div>
+</form>
+{% endfor %}
+{% endblock %}

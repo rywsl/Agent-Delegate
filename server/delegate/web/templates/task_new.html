@@ -15,7 +15,7 @@
   </div>
   <label>输入文件（可选：.zip / .tar / .tar.gz 会解压到工作区，其他文件按原名放入工作区）</label>
   <input type="file" name="archive">
-  <p class="muted small">执行配置：{{ options.agent }} · {{ options.model }} · 预算 {{ fmt_usd(options.budget_quota) }} · 超时 {{ options.timeout_s // 60 }} 分钟（在<a href="/settings">设置</a>中修改）</p>
+  <p class="muted small">执行配置：{{ options.agent }} · {{ options.model }} · {{ options.sandbox }} · {{ options.harness }} · 超时 {{ options.timeout_s // 60 }} 分钟（在<a href="/settings">设置</a>中修改）</p>
   <button>提交</button>
 </form>
 {% endblock %}

@@ -82,37 +82,6 @@ function initTaskPage(taskId, initialStatus) {
     if (!TERMINAL.includes(status)) setTimeout(poll, 2000);
   }
   poll();
-  loadBilling(taskId);
-}
-
-async function loadBilling(taskId) {
-  const box = document.getElementById("billing-logs");
-  try {
-    const resp = await fetch(`/tasks/${taskId}/billing`, { headers: { Accept: "application/json" } });
-    const data = await resp.json();
-    if (data.error) { box.textContent = `无法读取网关日志：${data.error}`; return; }
-    if (!data.logs.length) { box.textContent = "暂无网关请求记录"; return; }
-    const types = { 2: "消费", 5: "错误", 6: "退款" };
-    const rows = data.logs.map((l) => el("tr", { title: l.content || "" },
-      el("td", {}, new Date(l.time * 1000).toLocaleString("zh-CN", { hour12: false })),
-      el("td", {}, types[l.type] || l.type),
-      el("td", { class: "mono" }, l.model || "-"),
-      el("td", { class: "num" }, (l.prompt_tokens || 0).toLocaleString()),
-      el("td", { class: "num" }, (l.completion_tokens || 0).toLocaleString()),
-      el("td", { class: "num" }, `$${l.cost_usd.toFixed(6)}`),
-      el("td", { class: "num" }, l.use_time != null ? `${l.use_time}s` : "-"),
-      el("td", { class: "mono small" }, l.request_id || "-")));
-    const sum = data.logs.filter((l) => l.type === 2).reduce((a, l) => a + l.cost_usd, 0);
-    box.replaceChildren(el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "时间"), el("th", {}, "类型"), el("th", {}, "模型"), el("th", { class: "num" }, "输入"),
-        el("th", { class: "num" }, "输出"), el("th", { class: "num" }, "费用"), el("th", { class: "num" }, "耗时"),
-        el("th", {}, "请求 ID"))),
-      el("tbody", {}, ...rows)),
-      el("p", { class: "small muted" }, `${data.logs.length} 条记录，消费合计 $${sum.toFixed(6)}`));
-    box.classList.remove("muted");
-  } catch (e) {
-    box.textContent = "无法读取网关日志";
-  }
 }
 
 document.addEventListener("click", (e) => {

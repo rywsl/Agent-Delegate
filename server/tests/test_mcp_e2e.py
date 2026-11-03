@@ -37,7 +37,7 @@ def _serve(app, port: int) -> uvicorn.Server:
 
 @pytest.fixture()
 def stack(env, fake_docker, monkeypatch):
-    from delegate import billing, config
+    from delegate import config
     from delegate.db import session_scope
     from delegate.models import ApiKey, User
     from delegate.security import generate_api_key, hash_password
@@ -57,7 +57,6 @@ def stack(env, fake_docker, monkeypatch):
         user = User(email="mcp@example.com", display_name="m", password_hash=hash_password("password1"))
         db.add(user)
         db.flush()
-        billing.adjust(db, user, 10_000_000, kind="admin_grant", actor="test")
         plaintext, prefix, digest = generate_api_key()
         db.add(ApiKey(user_id=user.id, name="t", prefix=prefix, key_hash=digest))
     yield {"url": f"http://127.0.0.1:{mcp_port}/mcp", "key": plaintext}

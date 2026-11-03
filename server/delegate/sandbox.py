@@ -37,7 +37,8 @@ class SandboxSpec:
     spec: dict  # serialised to /task/spec.json (readable by the agent; no platform secrets)
     files: dict[str, bytes]  # relative path -> content, placed under /task/files
     uploads: dict[str, Path]  # upload id -> file on the host, placed under /task/uploads
-    gateway_key: str
+    api_key: str
+    image: str
 
 
 @lru_cache(maxsize=1)
@@ -102,12 +103,12 @@ def create_and_start(spec: SandboxSpec) -> Container:
     except NotFound:
         pass
     container = client.containers.create(
-        s.sandbox_image,
+        spec.image,
         name=name,
         init=True,
         user="agent",
         working_dir="/workspace",
-        environment={**s.sandbox_agent_env, "DELEGATE_GATEWAY_KEY": spec.gateway_key, "DELEGATE_TASK_ID": spec.task_id},
+        environment={**s.sandbox_agent_env, "DELEGATE_LLM_API_KEY": spec.api_key, "DELEGATE_TASK_ID": spec.task_id},
         network=s.sandbox_network,
         mem_limit=s.sandbox_memory,
         memswap_limit=s.sandbox_memory,

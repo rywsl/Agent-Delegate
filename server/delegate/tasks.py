@@ -145,12 +145,14 @@ def resolve_options(user: User) -> dict[str, Any]:
     agent = user.pref_agent if user.pref_agent in s.agents else s.default_agent
     models = s.models_for(agent)
     model = user.pref_model if user.pref_model in models else models[0]
-    budget = min(user.pref_budget_usd or s.default_budget_usd, s.max_budget_usd)
+    sandbox = user.pref_sandbox if user.pref_sandbox in s.sandboxes else s.default_sandbox
+    harness = user.pref_harness if user.pref_harness in s.harnesses else s.default_harness
     timeout = min(user.pref_timeout_s or s.default_timeout_s, s.max_timeout_s)
     return {
         "agent": agent,
         "model": model,
-        "budget_quota": s.usd_to_quota(budget),
+        "sandbox": sandbox,
+        "harness": harness,
         "timeout_s": int(timeout),
         "max_turns": s.default_max_turns,
     }
@@ -215,7 +217,8 @@ def create_task(
         source=source,
         agent=task.agent,
         model=task.model,
-        budget_quota=task.budget_quota,
+        sandbox=task.sandbox,
+        harness=task.harness,
         inline_files=len(files),
         uploads=[u["id"] for u in upload_meta],
         repo=repo_display,
@@ -322,9 +325,8 @@ def public_view(session: Session, task: Task, *, include_patch: bool = True) -> 
                 for o in outputs[:MAX_LISTED_OUTPUTS]
             ],
         }
-    view["billing"] = {
-        "cost_usd": round(s.quota_to_usd(task.billed_quota), 4),
-        "tokens": task.billed_prompt_tokens + task.billed_completion_tokens,
-        "final": task.billing_reconciled_at is not None,
+    view["usage"] = {
+        "input_tokens": (task.agent_usage or {}).get("input_tokens", 0),
+        "output_tokens": (task.agent_usage or {}).get("output_tokens", 0),
     }
     return view

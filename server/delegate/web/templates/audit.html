@@ -5,7 +5,7 @@
 <h1>{{ '全局审计日志' if admin_view else '审计日志' }}</h1>
 {% if admin_view %}
 <form class="actions" method="get" action="/admin/audit" style="margin-bottom:12px">
-  <input type="text" name="action" value="{{ action or '' }}" placeholder="按操作前缀过滤，如 task. / billing. / auth." style="max-width:360px">
+  <input type="text" name="action" value="{{ action or '' }}" placeholder="按操作前缀过滤，如 task. / auth." style="max-width:360px">
   <button class="secondary">过滤</button>
 </form>
 {% endif %}

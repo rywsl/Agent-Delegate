@@ -1,7 +1,7 @@
 """MCP gateway: the only surface a delegating (local) agent talks to.
 
 Stateless facade over the web site's /api/v1. It holds no credentials of its own: every call is made
-with the caller's own API key (``Authorization: Bearer dlg_...``), so all authorisation, billing and
+with the caller's own API key (``Authorization: Bearer dlg_...``), so all authorisation and
 auditing happen on the web site. The tools are intentionally coarse: hand a task over, wait for the
 outcome, fetch deliverables. There is no way to steer the cloud agent step by step.
 """
@@ -43,7 +43,7 @@ arguments. Outputs come back as download URLs that you fetch with curl (patch ->
 Tasks often take many minutes. Each call waits a bounded time; while the task is still running, keep
 calling `wait_task` with its id until it reports a final status (you may do other work in between)."""
 
-mcp = MCPServer(name="delegate", instructions=INSTRUCTIONS, version="0.1.0")
+mcp = MCPServer(name="delegate", instructions=INSTRUCTIONS, version="0.2.0")
 
 
 class InlineFile(BaseModel):
@@ -148,9 +148,6 @@ def format_task(view: dict[str, Any]) -> str:
             lines.append(f"- {item['path']} ({_size(item['size'])}): curl -fsSL {_shell_quote(item['url'])} -o <dest>")
         lines.append(f"All outputs: curl -fsSL {_shell_quote(outputs['bundle_url'])} | tar -xzf - -C <dest-dir>")
 
-    billing = view.get("billing") or {}
-    cost = f"${billing.get('cost_usd', 0):.4f}, {billing.get('tokens', 0):,} tokens"
-    lines += ["", f"Cost: {cost}{'' if billing.get('final') else ' (provisional)'}"]
     lines.append("Download links expire after a while; call wait_task again for fresh ones.")
     lines.append(f"Audit trail (for humans): {view['audit_url']}")
     return "\n".join(lines)

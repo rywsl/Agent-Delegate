@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -31,7 +32,6 @@ def _list(name: str, default: str) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
-    # --- web site ---
     secret_key: str
     database_url: str
     data_dir: Path
@@ -41,37 +41,38 @@ class Settings:
     session_max_age: int
     cookie_secure: bool
 
-    # --- new-api sidecar (credentials are held by the web site only) ---
-    newapi_base_url: str
-    newapi_root_username: str
-    newapi_root_password: str | None
-    newapi_quota_per_unit: int
-    newapi_user_group: str
-    signup_credit_usd: float
+    openai_api_key: str | None
+    openai_base_url: str | None
+    anthropic_api_key: str | None
+    anthropic_base_url: str | None
+    gemini_api_key: str | None
+    gemini_base_url: str | None
 
-    # --- sandbox ---
     docker_host: str | None
     sandbox_image: str
     sandbox_network: str
-    sandbox_newapi_url: str
-    sandbox_allowed_ips: str
     sandbox_agent_env: dict[str, str]
     sandbox_max_concurrent: int
     sandbox_memory: str
     sandbox_cpus: float
     sandbox_pids: int
 
-    # --- task policy ---
     agents: list[str]
     default_agent: str
-    claude_models: list[str]
-    codex_models: list[str]
-    default_budget_usd: float
-    max_budget_usd: float
-    min_balance_usd: float
+    sandboxes: list[str]
+    default_sandbox: str
+    harnesses: list[str]
+    default_harness: str
+    harness_commands: dict[str, list[str]]
+    sandbox_images: dict[str, str]
+    anthropic_models: list[str]
+    openai_models: list[str]
+    gemini_models: list[str]
     default_timeout_s: int
     max_timeout_s: int
     default_max_turns: int
+    llm_request_timeout_s: int
+    max_output_tokens: int
     per_user_concurrency: int
     max_attachment_bytes: int
     max_upload_bytes: int
@@ -89,13 +90,25 @@ class Settings:
         return self.data_dir / "uploads"
 
     def models_for(self, agent: str) -> list[str]:
-        return self.claude_models if agent == "claude" else self.codex_models
+        return {
+            "anthropic": self.anthropic_models,
+            "openai": self.openai_models,
+            "gemini": self.gemini_models,
+        }.get(agent, [])
 
-    def usd_to_quota(self, usd: float) -> int:
-        return int(round(usd * self.newapi_quota_per_unit))
+    def provider_api_key(self, provider: str) -> str | None:
+        return {
+            "openai": self.openai_api_key,
+            "anthropic": self.anthropic_api_key,
+            "gemini": self.gemini_api_key,
+        }.get(provider)
 
-    def quota_to_usd(self, quota: int | float | None) -> float:
-        return (quota or 0) / self.newapi_quota_per_unit
+    def provider_base_url(self, provider: str) -> str | None:
+        return {
+            "openai": self.openai_base_url,
+            "anthropic": self.anthropic_base_url,
+            "gemini": self.gemini_base_url,
+        }.get(provider)
 
 
 @lru_cache(maxsize=1)
@@ -114,33 +127,36 @@ def get_settings() -> Settings:
         allow_registration=_bool("DELEGATE_ALLOW_REGISTRATION", True),
         session_max_age=_int("DELEGATE_SESSION_MAX_AGE", 7 * 24 * 3600),
         cookie_secure=_bool("DELEGATE_COOKIE_SECURE", public_url.startswith("https://")),
-        newapi_base_url=_env("NEWAPI_BASE_URL", "http://new-api:3000").rstrip("/"),
-        newapi_root_username=_env("NEWAPI_ROOT_USERNAME", "root"),
-        newapi_root_password=_env("NEWAPI_ROOT_PASSWORD"),
-        newapi_quota_per_unit=_int("NEWAPI_QUOTA_PER_UNIT", 500000),
-        newapi_user_group=_env("NEWAPI_USER_GROUP", "default"),
-        signup_credit_usd=_float("DELEGATE_SIGNUP_CREDIT_USD", 0.0),
+        openai_api_key=_env("OPENAI_API_KEY"),
+        openai_base_url=_env("OPENAI_BASE_URL"),
+        anthropic_api_key=_env("ANTHROPIC_API_KEY"),
+        anthropic_base_url=_env("ANTHROPIC_BASE_URL"),
+        gemini_api_key=_env("GEMINI_API_KEY") or _env("GOOGLE_API_KEY"),
+        gemini_base_url=_env("GEMINI_BASE_URL") or _env("GOOGLE_BASE_URL"),
         docker_host=_env("DOCKER_HOST"),
         sandbox_image=_env("SANDBOX_IMAGE", "delegate-sandbox:latest"),
         sandbox_network=_env("SANDBOX_NETWORK", "delegate_sandbox"),
-        sandbox_newapi_url=_env("SANDBOX_NEWAPI_URL", "http://new-api:3000").rstrip("/"),
-        sandbox_allowed_ips="\n".join(_list("SANDBOX_ALLOWED_IPS", "")),
-        # extra environment for the agent CLIs, e.g. "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1"
         sandbox_agent_env=dict(item.split("=", 1) for item in _list("SANDBOX_AGENT_ENV", "") if "=" in item),
         sandbox_max_concurrent=_int("SANDBOX_MAX_CONCURRENT", 4),
         sandbox_memory=_env("SANDBOX_MEMORY", "4g"),
         sandbox_cpus=_float("SANDBOX_CPUS", 2.0),
         sandbox_pids=_int("SANDBOX_PIDS", 1024),
-        agents=_list("DELEGATE_AGENTS", "claude,codex"),
-        default_agent=_env("DELEGATE_DEFAULT_AGENT", "claude"),
-        claude_models=_list("DELEGATE_CLAUDE_MODELS", "claude-sonnet-5-5,claude-opus-5-5,claude-haiku-5-5"),
-        codex_models=_list("DELEGATE_CODEX_MODELS", "gpt-5.5-codex,gpt-5.5"),
-        default_budget_usd=_float("DELEGATE_DEFAULT_BUDGET_USD", 5.0),
-        max_budget_usd=_float("DELEGATE_MAX_BUDGET_USD", 50.0),
-        min_balance_usd=_float("DELEGATE_MIN_BALANCE_USD", 0.10),
+        agents=_list("DELEGATE_AGENTS", "anthropic,openai,gemini"),
+        default_agent=_env("DELEGATE_DEFAULT_AGENT", "anthropic"),
+        sandboxes=_list("DELEGATE_SANDBOXES", "docker"),
+        default_sandbox=_env("DELEGATE_DEFAULT_SANDBOX", "docker"),
+        harnesses=_list("DELEGATE_HARNESSES", "sdk,claude-code,codex,gemini,grok,pi,deepseek"),
+        default_harness=_env("DELEGATE_DEFAULT_HARNESS", "sdk"),
+        harness_commands=json.loads(_env("DELEGATE_HARNESS_COMMANDS", "{}")),
+        sandbox_images=json.loads(_env("DELEGATE_SANDBOX_IMAGES", "{}")),
+        anthropic_models=_list("DELEGATE_ANTHROPIC_MODELS", "claude-sonnet-4-5,claude-opus-4-5,claude-haiku-4-5"),
+        openai_models=_list("DELEGATE_OPENAI_MODELS", "gpt-5.1-codex,gpt-5.1"),
+        gemini_models=_list("DELEGATE_GEMINI_MODELS", "gemini-3-pro-preview,gemini-2.5-flash"),
         default_timeout_s=_int("DELEGATE_DEFAULT_TIMEOUT", 3600),
         max_timeout_s=_int("DELEGATE_MAX_TIMEOUT", 4 * 3600),
         default_max_turns=_int("DELEGATE_DEFAULT_MAX_TURNS", 200),
+        llm_request_timeout_s=_int("DELEGATE_LLM_REQUEST_TIMEOUT", 300),
+        max_output_tokens=_int("DELEGATE_MAX_OUTPUT_TOKENS", 8192),
         per_user_concurrency=_int("DELEGATE_PER_USER_CONCURRENCY", 2),
         max_attachment_bytes=_int("DELEGATE_MAX_ATTACHMENT_BYTES", 1024 * 1024),
         max_upload_bytes=_int("DELEGATE_MAX_UPLOAD_BYTES", 512 * 1024 * 1024),

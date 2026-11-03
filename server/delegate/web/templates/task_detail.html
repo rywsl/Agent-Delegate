@@ -2,154 +2,52 @@
 {% from "_macros.html" import badge %}
 {% block title %}{{ task.title }}{% endblock %}
 {% block content %}
-<div class="between">
-  <div>
-    <h1 style="margin-bottom:4px">{{ task.title }}</h1>
-    <div class="muted small mono">{{ task.id }}</div>
-  </div>
-  <div class="actions">
-    <span id="status-badge">{{ badge(task.status) }}</span>
-    {% if task.is_active %}
-    <form class="inline" method="post" action="/tasks/{{ task.id }}/cancel" onsubmit="return confirm('确定取消该任务？已完成的部分仍会被收集。')">
-      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">取消任务</button>
-    </form>
-    {% endif %}
+<div class="between"><div><h1 style="margin-bottom:4px">{{ task.title }}</h1><div class="muted small mono">{{ task.id }}</div></div>
+  <div class="actions"><span id="status-badge">{{ badge(task.status) }}</span>
+    {% if task.is_active %}<form class="inline" method="post" action="/tasks/{{ task.id }}/cancel" onsubmit="return confirm('确定取消该任务？已完成的部分仍会被收集。')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">取消任务</button></form>{% endif %}
   </div>
 </div>
 {% if task.status_reason %}<div class="flash {{ 'error' if task.status in ('failed','timeout') else 'info' }}" style="margin-top:12px">{{ task.status_reason }}</div>{% endif %}
-
 <div class="row" style="margin-top:14px">
-  <div class="panel">
-    <h2>概览</h2>
-    <div class="kv">
-      {% if owner.id != user.id %}<div>用户</div><div>{{ owner.email }}</div>{% endif %}
-      <div>来源</div><div>{{ task.source }}{% if api_key %} · 密钥 <span class="mono">{{ api_key.prefix }}…</span>（{{ api_key.name }}）{% endif %}</div>
-      <div>客户端</div><div class="small">{{ task.client_info.get('client') or '-' }} · {{ task.client_info.get('ip') or '-' }}</div>
-      <div>Agent / 模型</div><div>{{ task.agent }} · {{ task.model }}</div>
-      <div>预算 / 超时</div><div>{{ fmt_usd(task.budget_quota) }} · {{ task.timeout_s // 60 }} 分钟 · 最多 {{ task.max_turns }} 轮</div>
-      <div>创建</div><div>{{ fmt_dt(task.created_at) }}</div>
-      <div>开始 / 结束</div><div>{{ fmt_dt(task.started_at) }} → {{ fmt_dt(task.finished_at) }}</div>
-      <div>耗时</div><div>{{ fmt_duration(task.duration_s) }}</div>
-    </div>
-  </div>
-  <div class="panel">
-    <h2>沙箱</h2>
-    <div class="kv">
-      <div>容器</div><div class="mono small">{{ task.container_name or '-' }}</div>
-      <div>容器 ID</div><div class="mono small">{{ (task.container_id or '-')[:24] }}</div>
-      <div>镜像</div><div class="mono small">{{ task.sandbox_image or '-' }}</div>
-      <div>资源限制</div><div class="small">{% if task.sandbox_limits %}内存 {{ task.sandbox_limits.memory }} · CPU {{ task.sandbox_limits.cpus }} · 进程 {{ task.sandbox_limits.pids }} · 网络 {{ task.sandbox_limits.network }}{% else %}-{% endif %}</div>
-      <div>退出码</div><div>{{ task.exit_code if task.exit_code is not none else '-' }}</div>
-      <div>网关令牌</div><div class="mono small">{{ task.newapi_token_name or '-' }}{% if task.newapi_token_id %} (#{{ task.newapi_token_id }}){% endif %}</div>
-      <div>Worker</div><div class="mono small">{{ task.worker_id or '-' }}</div>
-    </div>
-  </div>
+  <div class="panel"><h2>概览</h2><div class="kv">
+    {% if owner.id != user.id %}<div>用户</div><div>{{ owner.email }}</div>{% endif %}
+    <div>来源</div><div>{{ task.source }}{% if api_key %} · 密钥 <span class="mono">{{ api_key.prefix }}…</span>（{{ api_key.name }}）{% endif %}</div>
+    <div>客户端</div><div class="small">{{ task.client_info.get('client') or '-' }} · {{ task.client_info.get('ip') or '-' }}</div>
+    <div>提供商 / 模型</div><div>{{ task.agent }} · {{ task.model }}</div>
+    <div>沙箱 / Harness</div><div>{{ task.sandbox }} · {{ task.harness }}</div>
+    <div>执行限制</div><div>{{ task.timeout_s // 60 }} 分钟 · 最多 {{ task.max_turns }} 轮</div>
+    <div>创建</div><div>{{ fmt_dt(task.created_at) }}</div><div>开始 / 结束</div><div>{{ fmt_dt(task.started_at) }} → {{ fmt_dt(task.finished_at) }}</div>
+    <div>耗时</div><div>{{ fmt_duration(task.duration_s) }}</div>
+  </div></div>
+  <div class="panel"><h2>沙箱</h2><div class="kv">
+    <div>容器</div><div class="mono small">{{ task.container_name or '-' }}</div><div>容器 ID</div><div class="mono small">{{ (task.container_id or '-')[:24] }}</div>
+    <div>镜像</div><div class="mono small">{{ task.sandbox_image or '-' }}</div>
+    <div>资源限制</div><div class="small">{% if task.sandbox_limits %}内存 {{ task.sandbox_limits.memory }} · CPU {{ task.sandbox_limits.cpus }} · 进程 {{ task.sandbox_limits.pids }} · 网络 {{ task.sandbox_limits.network }}{% else %}-{% endif %}</div>
+    <div>退出码</div><div>{{ task.exit_code if task.exit_code is not none else '-' }}</div><div>Worker</div><div class="mono small">{{ task.worker_id or '-' }}</div>
+  </div></div>
 </div>
-
-<div class="panel">
-  <h2>任务描述</h2>
-  <pre>{{ task.prompt }}</pre>
+<div class="panel"><h2>任务描述</h2><pre>{{ task.prompt }}</pre>
   {% if task.repo_url %}<p>仓库：<span class="mono">{{ task.repo_url }}</span>{% if task.repo_ref %} @ <span class="mono">{{ task.repo_ref }}</span>{% endif %}</p>{% endif %}
-  {% if task.uploads or task.attachments %}
-  <h3>输入文件</h3>
-  <table>
-    <thead><tr><th>类型</th><th>目标位置</th><th class="num">大小</th><th>SHA-256</th><th></th></tr></thead>
-    <tbody>
-    {% for u in task.uploads %}
-      <tr><td>上传 · {{ u.kind }}</td><td class="mono">{{ u.dest }}</td><td class="num">{{ fmt_bytes(u.size) }}</td>
-        <td class="mono small">{{ (u.sha256 or '')[:16] }}…</td>
-        <td><a href="/tasks/{{ task.id }}/artifacts/upload?path={{ u.id }}">下载</a>
-          {% if u.id in upload_trail %}<span class="muted small">· 上传于 {{ fmt_dt(upload_trail[u.id].uploaded_at) }}</span>{% endif %}</td></tr>
-    {% endfor %}
-    {% for a in task.attachments %}
-      <tr><td>内联文件</td><td class="mono">{{ a.path }}</td><td class="num">{{ fmt_bytes(a.size) }}</td>
-        <td class="mono small">{{ a.sha256[:16] }}…</td><td><a href="/tasks/{{ task.id }}/artifacts/file?path={{ a.path | urlencode }}">下载</a></td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
+  {% if task.uploads or task.attachments %}<h3>输入文件</h3><table><thead><tr><th>类型</th><th>目标位置</th><th class="num">大小</th><th>SHA-256</th><th></th></tr></thead><tbody>
+    {% for u in task.uploads %}<tr><td>上传 · {{ u.kind }}</td><td class="mono">{{ u.dest }}</td><td class="num">{{ fmt_bytes(u.size) }}</td><td class="mono small">{{ (u.sha256 or '')[:16] }}…</td><td><a href="/tasks/{{ task.id }}/artifacts/upload?path={{ u.id }}">下载</a>{% if u.id in upload_trail %}<span class="muted small">· 上传于 {{ fmt_dt(upload_trail[u.id].uploaded_at) }}</span>{% endif %}</td></tr>{% endfor %}
+    {% for a in task.attachments %}<tr><td>内联文件</td><td class="mono">{{ a.path }}</td><td class="num">{{ fmt_bytes(a.size) }}</td><td class="mono small">{{ a.sha256[:16] }}…</td><td><a href="/tasks/{{ task.id }}/artifacts/file?path={{ a.path | urlencode }}">下载</a></td></tr>{% endfor %}
+  </tbody></table>{% endif %}
 </div>
-
 {% if task.status in ('succeeded','failed','cancelled','timeout') %}
-<div class="panel">
-  <h2>结果报告 <span class="muted small">（本地 agent 收到的内容）</span></h2>
-  <div class="markdown">{{ markdown(task.result_text or '（无）') }}</div>
-</div>
-
-<div class="panel">
-  <div class="between">
-    <h2>工作区变更</h2>
-    {% if patch_exists %}<a class="btn secondary" href="/tasks/{{ task.id }}/artifacts/patch">下载 patch</a>{% endif %}
-  </div>
-  {% set ps = task.patch_stats or {} %}
-  <p>{{ ps.get('files', 0) }} 个文件，<span style="color:var(--ok)">+{{ ps.get('insertions', 0) }}</span> / <span style="color:var(--err)">-{{ ps.get('deletions', 0) }}</span>{% if ps.get('bytes') %} · {{ fmt_bytes(ps.bytes) }}{% endif %}</p>
+<div class="panel"><h2>结果报告 <span class="muted small">（本地 agent 收到的内容）</span></h2><div class="markdown">{{ markdown(task.result_text or '（无）') }}</div></div>
+<div class="panel"><div class="between"><h2>工作区变更</h2>{% if patch_exists %}<a class="btn secondary" href="/tasks/{{ task.id }}/artifacts/patch">下载 patch</a>{% endif %}</div>
+  {% set ps = task.patch_stats or {} %}<p>{{ ps.get('files', 0) }} 个文件，<span style="color:var(--ok)">+{{ ps.get('insertions', 0) }}</span> / <span style="color:var(--err)">-{{ ps.get('deletions', 0) }}</span>{% if ps.get('bytes') %} · {{ fmt_bytes(ps.bytes) }}{% endif %}</p>
   {% if ps.get('paths') %}<details><summary>文件列表</summary><pre>{{ ps.paths | join('\n') }}</pre></details>{% endif %}
-  {% if patch_text %}<details><summary>查看 diff</summary><pre>{{ patch_text }}</pre></details>
-  {% elif patch_exists %}<p class="muted small">patch 较大，请下载查看。</p>{% endif %}
+  {% if patch_text %}<details><summary>查看 diff</summary><pre>{{ patch_text }}</pre></details>{% elif patch_exists %}<p class="muted small">patch 较大，请下载查看。</p>{% endif %}
 </div>
-
-{% if task.outputs %}
-<div class="panel">
-  <div class="between"><h2>输出文件（/outputs）</h2><a class="btn secondary" href="/tasks/{{ task.id }}/artifacts/outputs">打包下载</a></div>
-  <table>
-    <thead><tr><th>路径</th><th class="num">大小</th><th></th></tr></thead>
-    <tbody>
-    {% for o in task.outputs %}
-      <tr><td class="mono">{{ o.path }}</td><td class="num">{{ fmt_bytes(o.size) }}</td>
-        <td><a href="/tasks/{{ task.id }}/artifacts/output?path={{ o.path | urlencode }}">下载</a></td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
+{% if task.outputs %}<div class="panel"><div class="between"><h2>输出文件（/outputs）</h2><a class="btn secondary" href="/tasks/{{ task.id }}/artifacts/outputs">打包下载</a></div><table><thead><tr><th>路径</th><th class="num">大小</th><th></th></tr></thead><tbody>
+{% for o in task.outputs %}<tr><td class="mono">{{ o.path }}</td><td class="num">{{ fmt_bytes(o.size) }}</td><td><a href="/tasks/{{ task.id }}/artifacts/output?path={{ o.path | urlencode }}">下载</a></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% set au = task.agent_usage or {} %}<div class="panel"><h2>Token 用量（仅审计，不计费）</h2><p>输入 {{ fmt_int(au.get('input_tokens')) }} · 输出 {{ fmt_int(au.get('output_tokens')) }} · 缓存读 {{ fmt_int(au.get('cache_read_tokens')) }} · 缓存写 {{ fmt_int(au.get('cache_write_tokens')) }} · {{ au.get('turns', 0) }} 轮</p></div>
 {% endif %}
-{% endif %}
-
-<div class="panel" id="billing">
-  <div class="between">
-    <h2>计费</h2>
-    <form class="inline" method="post" action="/tasks/{{ task.id }}/resync-billing">
-      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">与网关重新对账</button>
-    </form>
-  </div>
-  <div class="row">
-    <div><div class="stat-label">网关计费（权威）</div>
-      <div class="stat">{{ fmt_usd(task.billed_quota) }}</div>
-      <div class="small muted">输入 {{ fmt_int(task.billed_prompt_tokens) }} · 输出 {{ fmt_int(task.billed_completion_tokens) }} tokens · {{ task.billed_requests }} 次请求<br>
-        {% if task.billing_reconciled_at %}对账于 {{ fmt_dt(task.billing_reconciled_at) }}{% else %}尚未对账{% endif %}</div></div>
-    {% set au = task.agent_usage or {} %}
-    <div><div class="stat-label">Agent 自报用量（参考）</div>
-      <div class="small">输入 {{ fmt_int(au.get('input_tokens')) }} · 输出 {{ fmt_int(au.get('output_tokens')) }}<br>
-        缓存读 {{ fmt_int(au.get('cache_read_tokens')) }} · 缓存写 {{ fmt_int(au.get('cache_write_tokens')) }} · {{ au.get('turns', 0) }} 轮
-        {% if au.get('reported_cost_usd') is not none %}<br>agent 估算 ${{ '%.4f' % au.reported_cost_usd }}{% endif %}</div></div>
-  </div>
-  <h3>网关请求明细</h3>
-  <div id="billing-logs" class="small muted">加载中…</div>
-</div>
-
-<div class="panel">
-  <div class="between">
-    <h2>执行轨迹 <span class="muted small" id="ev-count"></span></h2>
-    {% if raw_log_exists %}<a class="btn secondary" href="/tasks/{{ task.id }}/artifacts/log">下载原始日志</a>{% endif %}
-  </div>
-  <div class="filters" id="ev-filters"></div>
-  <div class="timeline" id="timeline"></div>
-</div>
-
-<div class="panel">
-  <h2>审计记录</h2>
-  <table>
-    <thead><tr><th>时间</th><th>操作</th><th>操作者</th><th>IP</th><th>详情</th></tr></thead>
-    <tbody>
-    {% for a in trail %}
-      <tr><td class="small">{{ fmt_dt(a.ts) }}</td><td class="mono small">{{ a.action }}</td><td class="mono small">{{ a.actor }}</td>
-        <td class="small">{{ a.ip or '-' }}</td><td class="mono small">{{ a.detail | tojson }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
+<div class="panel"><div class="between"><h2>执行轨迹 <span class="muted small" id="ev-count"></span></h2>{% if raw_log_exists %}<a class="btn secondary" href="/tasks/{{ task.id }}/artifacts/log">下载原始日志</a>{% endif %}</div><div class="filters" id="ev-filters"></div><div class="timeline" id="timeline"></div></div>
+<div class="panel"><h2>审计记录</h2><table><thead><tr><th>时间</th><th>操作</th><th>操作者</th><th>IP</th><th>详情</th></tr></thead><tbody>
+{% for a in trail %}<tr><td class="small">{{ fmt_dt(a.ts) }}</td><td class="mono small">{{ a.action }}</td><td class="mono small">{{ a.actor }}</td><td class="small">{{ a.ip or '-' }}</td><td class="mono small">{{ a.detail | tojson }}</td></tr>{% endfor %}
+</tbody></table></div>
 {% endblock %}
-{% block scripts %}
-<script>
-  initTaskPage({{ task.id | tojson }}, {{ task.status | tojson }});
-</script>
-{% endblock %}
+{% block scripts %}<script>initTaskPage({{ task.id | tojson }}, {{ task.status | tojson }});</script>{% endblock %}

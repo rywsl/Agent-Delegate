@@ -1,4 +1,4 @@
-"""Password hashing, API keys and at-rest encryption of sidecar credentials."""
+"""Password hashing, API keys and at-rest encryption of provider credentials."""
 
 from __future__ import annotations
 
@@ -43,12 +43,6 @@ def generate_api_key() -> tuple[str, str, str]:
 
 def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
-
-
-def random_password(length: int = 20) -> str:
-    # new-api limits passwords to 8..20 characters; keep to an unambiguous alphabet.
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 @lru_cache(maxsize=1)

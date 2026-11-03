@@ -1,25 +1,28 @@
-# Sandbox image: one container per delegated task, running Claude Code or Codex headlessly.
-FROM node:22-bookworm-slim
-
-ARG CLAUDE_CODE_VERSION=latest
-ARG CODEX_VERSION=latest
+# Sandbox image: one container per delegated task, using the official model-provider SDKs.
+FROM python:3.12-bookworm
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      git ca-certificates curl wget jq ripgrep procps less unzip zip \
-      python3 python3-pip python3-venv build-essential \
- && rm -rf /var/lib/apt/lists/*
-
-# Claude Code's installer must not run from / (it would scan the whole filesystem).
-WORKDIR /tmp
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/codex@${CODEX_VERSION}" \
- && npm cache clean --force
+      git ca-certificates curl wget jq ripgrep procps less unzip zip build-essential \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir "openai>=1.0" "anthropic>=0.40" "google-genai>=1.0"
 
 RUN useradd -m -u 10001 -s /bin/bash agent \
  && mkdir -p /workspace /task /out /outputs \
  && chown agent:agent /workspace /task /out /outputs
 
-COPY runner.py /opt/delegate/runner.py
+# Optional harnesses are deliberately excluded from the default image. Build a variant with only
+# the package(s) needed by a deployment, e.g. HARNESS_PACKAGES=@anthropic-ai/claude-code.
+ARG HARNESS_PACKAGES=""
+RUN if [ -n "$HARNESS_PACKAGES" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends nodejs npm \
+      && npm install -g $HARNESS_PACKAGES \
+      && npm cache clean --force \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+COPY runner.py agent.py harness.py /opt/delegate/
 
 USER agent
 ENV HOME=/home/agent \

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import audit, billing, transfer
+from .. import audit, transfer
 from ..config import get_settings
 from ..db import new_session
 from ..models import ApiKey, Task, TaskStatus, Upload, UploadStatus, User, utcnow
@@ -61,11 +61,7 @@ def _actor(api_key: ApiKey) -> str:
 @router.get("/me")
 def me(principal: tuple[User, ApiKey] = Depends(api_principal)) -> dict[str, Any]:
     user, _ = principal
-    balance = billing.balance_quota(user)
-    return {
-        "email": user.email,
-        "balance_usd": round(get_settings().quota_to_usd(balance), 4) if balance is not None else None,
-    }
+    return {"email": user.email}
 
 
 @router.post("/tasks", status_code=201)
@@ -76,7 +72,6 @@ def submit_task(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     user, api_key = principal
-    billing.check_can_start(db, user)
     client = {
         "ip": audit.client_ip(request),
         "client": request.headers.get("x-delegate-client") or request.headers.get("user-agent"),

@@ -118,10 +118,6 @@ def api_principal(request: Request, db: Session = Depends(get_db)) -> tuple[User
 
 
 # --------------------------------------------------------------------------- template helpers
-def fmt_usd(quota: int | float | None) -> str:
-    return f"${get_settings().quota_to_usd(quota):,.4f}"
-
-
 def fmt_int(value: int | float | None) -> str:
     return f"{int(value or 0):,}"
 
@@ -169,7 +165,6 @@ STATUS_LABELS = {
 }
 
 templates.env.globals.update(
-    fmt_usd=fmt_usd,
     fmt_int=fmt_int,
     fmt_dt=fmt_dt,
     fmt_duration=fmt_duration,

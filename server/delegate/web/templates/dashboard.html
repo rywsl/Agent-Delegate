@@ -4,28 +4,21 @@
 {% block content %}
 <div class="between"><h1>控制台</h1><a class="btn" href="/tasks/new">新建任务</a></div>
 <div class="row">
-  <div class="panel"><div class="stat-label">余额</div>
-    <div class="stat">{% if balance is none %}<span class="muted">不可用</span>{% else %}{{ fmt_usd(balance) }}{% endif %}</div>
-    <a class="small" href="/billing">账单与充值 →</a></div>
   <div class="panel"><div class="stat-label">进行中</div><div class="stat">{{ active }}</div>
     <span class="small muted">共 {{ total }} 个任务</span></div>
-  <div class="panel"><div class="stat-label">近 30 天消费</div><div class="stat">{{ fmt_usd(spent_30d) }}</div>
-    <span class="small muted">按网关实际计费</span></div>
   <div class="panel"><div class="stat-label">执行配置</div>
     <div>{{ options.agent }} · {{ options.model }}</div>
-    <div class="small muted">单任务预算 {{ fmt_usd(options.budget_quota) }} · 超时 {{ (options.timeout_s // 60) }} 分钟</div>
+    <div class="small muted">{{ options.sandbox }} · {{ options.harness }} · 超时 {{ (options.timeout_s // 60) }} 分钟</div>
     <a class="small" href="/settings">修改 →</a></div>
 </div>
-
 {% if not has_key %}
 <div class="panel">
-  <h2>接入本地 Claude Code</h2>
+  <h2>接入本地 Agent</h2>
   <p>1. 在 <a href="/keys">API 密钥</a> 页面创建一个密钥。 2. 在本地执行：</p>
   <pre>claude mcp add --transport http delegate {{ settings.mcp_public_url }} --header "Authorization: Bearer &lt;你的密钥&gt;"</pre>
   <p class="muted small">之后本地 agent 即可通过 <code>delegate_task</code> 工具把任务外派到云端沙箱执行；执行过程的全部细节只在本站可见。</p>
 </div>
 {% endif %}
-
 <div class="panel">
   <div class="between"><h2>最近任务</h2><a href="/tasks">全部任务 →</a></div>
   {{ task_rows(recent) }}

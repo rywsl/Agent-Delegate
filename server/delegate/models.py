@@ -43,17 +43,11 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # Mirror account in the new-api sidecar. The user never sees it; the site holds its scoped PAT.
-    # The mirror password is derived from the site secret (see billing.mirror_password).
-    newapi_user_id: Mapped[int | None] = mapped_column(Integer, unique=True)
-    newapi_username: Mapped[str | None] = mapped_column(String(32), unique=True)
-    newapi_pat_enc: Mapped[str | None] = mapped_column(Text)
-    newapi_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
     # Task defaults chosen on the web site (the local agent cannot override them).
     pref_agent: Mapped[str | None] = mapped_column(String(32))
     pref_model: Mapped[str | None] = mapped_column(String(100))
-    pref_budget_usd: Mapped[float | None]
+    pref_sandbox: Mapped[str | None] = mapped_column(String(32))
+    pref_harness: Mapped[str | None] = mapped_column(String(32))
     pref_timeout_s: Mapped[int | None]
 
     api_keys: Mapped[list[ApiKey]] = relationship(back_populates="user")
@@ -98,9 +92,10 @@ class Task(Base):
     uploads: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{id,dest,kind,size,sha256}]
     outputs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # files from /outputs [{path,size}]
 
-    agent: Mapped[str] = mapped_column(String(32))
+    agent: Mapped[str] = mapped_column(String(32))  # model provider: anthropic | openai | gemini
     model: Mapped[str] = mapped_column(String(100))
-    budget_quota: Mapped[int] = mapped_column(Integer)
+    sandbox: Mapped[str] = mapped_column(String(32), default="docker")
+    harness: Mapped[str] = mapped_column(String(32), default="sdk")
     timeout_s: Mapped[int] = mapped_column(Integer)
     max_turns: Mapped[int] = mapped_column(Integer)
 
@@ -119,18 +114,9 @@ class Task(Base):
     exit_code: Mapped[int | None] = mapped_column(Integer)
 
     result_text: Mapped[str | None] = mapped_column(Text)
-    patch_stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # {files, insertions, deletions, bytes}
-    agent_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # usage as reported by the agent CLI
+    patch_stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    agent_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     event_count: Mapped[int] = mapped_column(Integer, default=0)
-
-    # Billing, authoritative numbers come from new-api logs of the per-task token.
-    newapi_token_id: Mapped[int | None] = mapped_column(Integer)
-    newapi_token_name: Mapped[str | None] = mapped_column(String(64))
-    billed_quota: Mapped[int] = mapped_column(Integer, default=0)
-    billed_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    billed_completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    billed_requests: Mapped[int] = mapped_column(Integer, default=0)
-    billing_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship()
 
@@ -207,34 +193,11 @@ class AuditLog(Base):
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
-class LedgerEntry(Base):
-    """Balance changes initiated by the web site (top-ups, grants). Usage is read from new-api."""
+class ProviderConfig(Base):
+    __tablename__ = "provider_configs"
 
-    __tablename__ = "ledger"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    kind: Mapped[str] = mapped_column(String(32))  # signup_credit | admin_grant | redeem_code
-    quota_delta: Mapped[int] = mapped_column(Integer)
-    actor: Mapped[str] = mapped_column(String(100))
-    note: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | applied | failed
-    error: Mapped[str | None] = mapped_column(Text)
-
-
-class RedeemCode(Base):
-    """Top-up codes issued by the site (applied to new-api with an atomic add_quota)."""
-
-    __tablename__ = "redeem_codes"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    hint: Mapped[str] = mapped_column(String(16))
-    quota: Mapped[int] = mapped_column(Integer)
-    note: Mapped[str] = mapped_column(String(200), default="")
-    created_by: Mapped[str] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    redeemed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    api_key_enc: Mapped[str | None] = mapped_column(Text)
+    base_url: Mapped[str] = mapped_column(String(1000), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

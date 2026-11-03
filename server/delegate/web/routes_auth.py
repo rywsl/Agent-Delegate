@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import audit, billing
+from .. import audit
 from ..config import get_settings
 from ..models import User, utcnow
 from ..security import hash_password, verify_password
@@ -99,17 +99,6 @@ def register(
     db.flush()
     audit.record(db, "auth.register", actor=f"user:{user.id}", user_id=user.id, request=request, admin=first_user)
     db.commit()
-
-    # Create the mirror account in new-api right away; if the sidecar is down it is retried lazily.
-    try:
-        billing.ensure_mirror(db, user)
-        if s.signup_credit_usd > 0:
-            billing.adjust(db, user, s.usd_to_quota(s.signup_credit_usd), kind="signup_credit", actor="system",
-                          note="注册赠送")
-        db.commit()
-    except billing.BillingError as exc:
-        db.rollback()
-        log.warning("mirror account for %s not created yet: %s", user.email, exc)
 
     login_session(request, user)
     flash(request, "注册成功" + ("，你是第一个用户，已获得管理员权限" if first_user else ""), "success")

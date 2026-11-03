@@ -1,7 +1,7 @@
 [project]
 name = "delegate"
-version = "0.1.0"
-description = "Delegate tasks from a local agent to sandboxed cloud agents, billed per token through a new-api sidecar"
+version = "0.2.0"
+description = "Delegate tasks from a local agent to sandboxed cloud agents using OpenAI, Anthropic or Gemini"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
