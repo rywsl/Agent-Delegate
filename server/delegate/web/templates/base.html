@@ -20,6 +20,7 @@
       <a href="/keys" class="{{ 'active' if path.startswith('/keys') }}">API 密钥</a>
       <a href="/audit" class="{{ 'active' if path == '/audit' }}">审计日志</a>
       <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">设置</a>
+      <a href="/app/">新控制台</a>
       {% if user.is_admin %}<a href="/admin" class="{{ 'active' if path.startswith('/admin') }}">管理</a>{% endif %}
     </nav>
     <div class="who">

@@ -16,8 +16,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import audit, transfer
+from . import billing
 from .config import get_settings
 from .models import Task, TaskStatus, Upload, UploadStatus, User, new_task_id, utcnow
+from .site import ensure_free_seconds, offered_models, queue_limits
 from .security import encrypt
 
 MAX_PROMPT_CHARS = 100_000
@@ -44,6 +46,10 @@ Operating rules:
 
 class TaskInputError(ValueError):
     pass
+
+
+class QueueFull(TaskInputError):
+    """The queue is deep enough that accepting another task would crowd out everyone else."""
 
 
 @dataclass
@@ -139,11 +145,11 @@ def _split_repo_url(url: str | None) -> tuple[str | None, str | None]:
     return display, url
 
 
-def resolve_options(user: User) -> dict[str, Any]:
+def resolve_options(user: User, db: Session | None = None) -> dict[str, Any]:
     """Execution options come from the user's settings on the web site, never from the caller."""
     s = get_settings()
     agent = user.pref_agent if user.pref_agent in s.agents else s.default_agent
-    models = s.models_for(agent)
+    models = offered_models(db, agent) if db is not None else s.models_for(agent)
     model = user.pref_model if user.pref_model in models else models[0]
     budget = min(user.pref_budget_usd or s.default_budget_usd, s.max_budget_usd)
     timeout = min(user.pref_timeout_s or s.default_timeout_s, s.max_timeout_s)
@@ -154,6 +160,17 @@ def resolve_options(user: User) -> dict[str, Any]:
         "timeout_s": int(timeout),
         "max_turns": s.default_max_turns,
     }
+
+
+def enforce_queue(db: Session, user: User) -> None:
+    global_max, per_user = queue_limits(db)
+    queued = Task.status == TaskStatus.QUEUED
+    total = int(db.scalar(select(func.count()).select_from(Task).where(queued)) or 0)
+    if total >= global_max:
+        raise QueueFull(f"the task queue is full ({global_max}); try again once a task starts")
+    mine = int(db.scalar(select(func.count()).select_from(Task).where(queued, Task.user_id == user.id)) or 0)
+    if mine >= per_user:
+        raise QueueFull(f"you already have {per_user} task(s) waiting; wait for one to start")
 
 
 def create_task(
@@ -184,6 +201,13 @@ def create_task(
         dest.write_bytes(content)
     upload_meta = [transfer.attach_to_task(upload, tdir) for upload in uploads]
 
+    options = resolve_options(user, session)
+    mode = billing.assert_can_submit(session, user, options["agent"])
+    if mode == "byok":
+        affordable = billing.affordable_sandbox_seconds(session, user)
+        options["timeout_s"] = max(60, min(options["timeout_s"], affordable))
+    ensure_free_seconds(session, user)
+    enforce_queue(session, user)
     task = Task(
         id=task_id,
         user_id=user.id,
@@ -201,7 +225,8 @@ def create_task(
         ],
         uploads=upload_meta,
         status=TaskStatus.QUEUED,
-        **resolve_options(user),
+        billing_mode=mode,
+        **options,
     )
     session.add(task)
     actor = f"apikey:{api_key_id}" if api_key_id else f"user:{user.id}"
@@ -216,6 +241,7 @@ def create_task(
         agent=task.agent,
         model=task.model,
         budget_quota=task.budget_quota,
+        billing_mode=task.billing_mode,
         inline_files=len(files),
         uploads=[u["id"] for u in upload_meta],
         repo=repo_display,
@@ -322,9 +348,20 @@ def public_view(session: Session, task: Task, *, include_patch: bool = True) -> 
                 for o in outputs[:MAX_LISTED_OUTPUTS]
             ],
         }
+    model_cost = s.quota_to_usd(task.billed_quota)
+    sandbox_cost = s.quota_to_usd(task.sandbox_billed_quota)
+    total = model_cost + sandbox_cost
     view["billing"] = {
-        "cost_usd": round(s.quota_to_usd(task.billed_quota), 4),
+        "mode": task.billing_mode or "platform",
+        "model_cost_usd": round(model_cost, 4),
+        "sandbox_seconds": int(task.sandbox_billed_seconds or 0),
+        "sandbox_free_seconds": int(task.sandbox_free_seconds_used or 0),
+        "sandbox_cost_usd": round(sandbox_cost, 4),
+        "cost_usd": round(total, 4),
+        "total_cost_usd": round(total, 4),
         "tokens": task.billed_prompt_tokens + task.billed_completion_tokens,
-        "final": task.billing_reconciled_at is not None,
+        "prompt_tokens": task.billed_prompt_tokens,
+        "completion_tokens": task.billed_completion_tokens,
+        "final": task.billing_reconciled_at is not None or task.billing_mode == "byok",
     }
     return view

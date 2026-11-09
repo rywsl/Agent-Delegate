@@ -1,9 +1,6 @@
 # Sandbox image: one container per delegated task, running Claude Code or Codex headlessly.
 FROM node:22-bookworm-slim
 
-ARG CLAUDE_CODE_VERSION=latest
-ARG CODEX_VERSION=latest
-
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       git ca-certificates curl wget jq ripgrep procps less unzip zip \
@@ -11,8 +8,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Claude Code's installer must not run from / (it would scan the whole filesystem).
+# Versions are intentionally unpinned. Admins install newer releases into the harness volume
+# without rebuilding this image; these copies are the fallback when that volume is empty.
 WORKDIR /tmp
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/codex@${CODEX_VERSION}" \
+COPY cli-packages.txt /tmp/cli-packages.txt
+RUN npm install -g $(tr '\n' ' ' < /tmp/cli-packages.txt) \
  && npm cache clean --force
 
 RUN useradd -m -u 10001 -s /bin/bash agent \

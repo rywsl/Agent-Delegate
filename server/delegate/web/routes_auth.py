@@ -97,6 +97,9 @@ def register(
     )
     db.add(user)
     db.flush()
+    from ..site import ensure_free_seconds
+
+    ensure_free_seconds(db, user)
     audit.record(db, "auth.register", actor=f"user:{user.id}", user_id=user.id, request=request, admin=first_user)
     db.commit()
 

@@ -49,6 +49,12 @@ def cmd_create_admin(args: argparse.Namespace) -> None:
     print(f"admin {args.email} {action}")
 
 
+def cmd_update_clis(_: argparse.Namespace) -> None:
+    from .harness_update import update_clis
+
+    print(update_clis())
+
+
 def cmd_grant(args: argparse.Namespace) -> None:
     init_db()
     s = get_settings()
@@ -71,6 +77,7 @@ def main() -> None:
     p.add_argument("email")
     p.add_argument("--password")
     p.set_defaults(fn=cmd_create_admin)
+    sub.add_parser("update-clis", help="install the current release of every sandbox CLI").set_defaults(fn=cmd_update_clis)
     p = sub.add_parser("grant", help="credit a user's balance")
     p.add_argument("email")
     p.add_argument("usd", type=float)

@@ -27,6 +27,8 @@ class FakeNewApi:
         self.proofs: dict[str, dict[str, Any]] = {}
         self.tokens: dict[int, dict[str, Any]] = {}
         self.logs: list[dict[str, Any]] = []
+        self.channels: dict[int, dict[str, Any]] = {}
+        self.next_channel = 1
         self.options: dict[str, str] = {}
         self.next_user = 1
         self.next_token = 1
@@ -264,6 +266,41 @@ class FakeNewApi:
                 return self.fail("not found")
             del self.tokens[token["id"]]
             return self.ok()
+
+        if path in ("/api/channel/", "/api/channel"):
+            denied = need_admin("channel:write")
+            if denied:
+                return denied
+            if method == "GET":
+                items = list(self.channels.values())
+                return self.ok({"page": 1, "page_size": 100, "total": len(items), "items": items})
+            if method == "POST":
+                channel = dict(body.get("channel") or {})
+                cid = self.next_channel
+                self.next_channel += 1
+                channel["id"] = cid
+                channel.setdefault("status", 1)
+                self.channels[cid] = channel
+                return self.ok()
+            if method == "PUT":
+                channel = dict(body)
+                self.channels[int(channel["id"])].update(channel)
+                return self.ok()
+        m = re.fullmatch(r"/api/channel/(\d+)/?", path)
+        if m and method == "DELETE":
+            denied = need_admin("channel:write")
+            if denied:
+                return denied
+            self.channels.pop(int(m.group(1)), None)
+            return self.ok()
+        m = re.fullmatch(r"/api/channel/test/(\d+)", path)
+        if m and method == "GET":
+            denied = need_admin("channel:write")
+            if denied:
+                return denied
+            if int(m.group(1)) not in self.channels:
+                return self.fail("not found")
+            return self.ok({"ok": True, "model": params.get("model", "")})
         return self.fail(f"fake: unhandled {method} {path}", 404)
 
     def transport(self) -> httpx.MockTransport:

@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -56,7 +56,31 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
+def _upgrade_existing_tables() -> None:
+    additions = {
+        "users": {"sandbox_free_seconds": "INTEGER"},
+        "tasks": {
+            "billing_mode": "VARCHAR(16) DEFAULT 'platform'",
+            "sandbox_started_at": "TIMESTAMP",
+            "sandbox_billed_seconds": "INTEGER DEFAULT 0",
+            "sandbox_billed_quota": "INTEGER DEFAULT 0",
+            "sandbox_free_seconds_used": "INTEGER DEFAULT 0",
+        },
+    }
+    engine = get_engine()
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        for table, columns in additions.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            for column, ddl in columns.items():
+                if column not in existing:
+                    connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {ddl}'))
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(get_engine())
+    _upgrade_existing_tables()

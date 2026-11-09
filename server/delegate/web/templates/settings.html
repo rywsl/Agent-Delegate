@@ -10,7 +10,7 @@
   <label>昵称</label><input type="text" name="display_name" value="{{ user.display_name }}">
   <label>云端 Agent</label>
   <select name="agent" id="agent">
-    {% for a in settings.agents %}<option value="{{ a }}" {{ 'selected' if options.agent == a }}>{{ {'claude': 'Claude Code', 'codex': 'Codex'}.get(a, a) }}</option>{% endfor %}
+    {% for a in settings.agents %}<option value="{{ a }}" {{ 'selected' if options.agent == a }}>{{ {'claude': 'Claude Code', 'codex': 'Codex', 'gemini': 'Gemini', 'grok': 'Grok', 'pi': 'Pi', 'deepseek': 'DeepSeek'}.get(a, a) }}</option>{% endfor %}
   </select>
   <label>模型</label>
   <select name="model" id="model">

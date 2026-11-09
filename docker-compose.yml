@@ -6,10 +6,12 @@
 # Networks
 #   backend   web, worker, mcp, postgres, new-api        (never reachable from sandboxes)
 #   sandbox   new-api + the per-task sandbox containers  (internet access for the agents)
-# new-api is only published on 127.0.0.1 for the operator (channel / pricing configuration).
+# new-api has no published port. Administrators configure channels from the Delegate admin console.
 
 x-server: &server
-  build: ./server
+  build:
+    context: .
+    dockerfile: server/Dockerfile
   image: delegate-server:latest
   restart: unless-stopped
   env_file: .env
@@ -18,6 +20,7 @@ x-server: &server
     NEWAPI_BASE_URL: http://new-api:3000
     SANDBOX_NEWAPI_URL: http://new-api:3000
     SANDBOX_NETWORK: delegate_sandbox
+    DELEGATE_HARNESS_VOLUME: delegate_harness_bin
   networks: [backend]
 
 services:
@@ -61,7 +64,9 @@ services:
 
   mcp:
     # Deliberately no env_file: the gateway holds no secrets; every call carries the caller's API key.
-    build: ./server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     image: delegate-server:latest
     restart: unless-stopped
     command: ["delegate-mcp"]
@@ -110,7 +115,6 @@ services:
     volumes:
       - newapi-data:/data
       - newapi-logs:/app/logs
-    ports: ["127.0.0.1:3000:3000"]
     depends_on:
       postgres: { condition: service_healthy }
     healthcheck:
@@ -141,3 +145,5 @@ volumes:
   newapi-data: {}
   newapi-logs: {}
   caddy-data: {}
+  harness-bin:
+    name: delegate_harness_bin

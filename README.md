@@ -51,7 +51,7 @@
 - 沙箱：非 root 用户、`cap_drop ALL`、`no-new-privileges`、内存/CPU/进程数限制、`init`；
   只接入 `delegate_sandbox` 网络（可上网，能访问 new-api，访问不到网站和数据库）。
 - 沙箱里唯一的凭证是本任务的预算受限 key（可选再用 `SANDBOX_ALLOWED_IPS` 限制来源 IP）。
-- new-api 只绑定 `127.0.0.1:3000`，供运维配置上游渠道与定价。
+- new-api 不映射宿主机端口。上游渠道、模型和分组在 Delegate 管理后台里配置，管理员不打开 new-api 自己的页面。
 
 ## 目录
 
@@ -80,9 +80,10 @@ docker compose up -d
 ```
 
 1. 打开网站注册：**第一个注册的账户自动成为管理员**（也可 `docker compose exec web delegate-admin create-admin you@x.com`）。
-2. 在 new-api 后台配置上游渠道与模型定价：`ssh -L 3000:127.0.0.1:3000 server`，浏览器打开
-   `http://localhost:3000`，用 `root` / `NEWAPI_ROOT_PASSWORD` 登录。渠道里的模型名需与
-   `DELEGATE_CLAUDE_MODELS` / `DELEGATE_CODEX_MODELS` 一致；Codex 需要支持 `/v1/responses` 的渠道。
+2. 用管理员账号打开 `/app/`，在「上游渠道」里把供应商密钥写进 new-api。模型名要和后台「开放模型」
+   （初始值来自 `DELEGATE_*_MODELS`）一致；Codex 需要支持 `/v1/responses` 的渠道。
+   沙箱 CLI 不锁版本，同一页可以「更新全部 CLI」。用户没填自己的密钥时走平台计费；填了就只按沙箱时长扣费，
+   并先用管理员配置的一次性免费分钟。队列满了会拒绝新任务。
 3. 管理后台 → 用户 → 调整余额，或生成充值码发给用户。
 4. 管理后台概览页可看到 new-api 与 Docker 的健康状态。
 

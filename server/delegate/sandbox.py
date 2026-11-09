@@ -101,13 +101,24 @@ def create_and_start(spec: SandboxSpec) -> Container:
         client.containers.get(name).remove(force=True)
     except NotFound:
         pass
+    env_var = "DELEGATE_LLM_API_KEY" if (spec.spec.get("auth") or {}).get("mode") == "byok" else "DELEGATE_GATEWAY_KEY"
+    volumes = None
+    if s.harness_volume:
+        # Updated CLIs land here and take PATH priority over the ones baked into the image.
+        volumes = {s.harness_volume: {"bind": "/opt/harness", "mode": "ro"}}
     container = client.containers.create(
         s.sandbox_image,
         name=name,
         init=True,
         user="agent",
         working_dir="/workspace",
-        environment={**s.sandbox_agent_env, "DELEGATE_GATEWAY_KEY": spec.gateway_key, "DELEGATE_TASK_ID": spec.task_id},
+        environment={
+            **s.sandbox_agent_env,
+            env_var: spec.gateway_key,
+            "DELEGATE_TASK_ID": spec.task_id,
+            "PATH": "/opt/harness/bin:/usr/local/bin:/usr/bin:/bin",
+        },
+        volumes=volumes,
         network=s.sandbox_network,
         mem_limit=s.sandbox_memory,
         memswap_limit=s.sandbox_memory,

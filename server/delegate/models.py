@@ -55,8 +55,11 @@ class User(Base):
     pref_model: Mapped[str | None] = mapped_column(String(100))
     pref_budget_usd: Mapped[float | None]
     pref_timeout_s: Mapped[int | None]
+    # None means the account has not received its one-time sandbox grant yet.
+    sandbox_free_seconds: Mapped[int | None] = mapped_column(Integer)
 
     api_keys: Mapped[list[ApiKey]] = relationship(back_populates="user")
+    provider_keys: Mapped[list[UserProviderKey]] = relationship(back_populates="user")
 
 
 class ApiKey(Base):
@@ -122,6 +125,13 @@ class Task(Base):
     patch_stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # {files, insertions, deletions, bytes}
     agent_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # usage as reported by the agent CLI
     event_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # platform: model tokens through new-api. byok: the user's own provider key, sandbox time only.
+    billing_mode: Mapped[str] = mapped_column(String(16), default="platform")
+    sandbox_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sandbox_billed_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    sandbox_billed_quota: Mapped[int] = mapped_column(Integer, default=0)
+    sandbox_free_seconds_used: Mapped[int] = mapped_column(Integer, default=0)
 
     # Billing, authoritative numbers come from new-api logs of the per-task token.
     newapi_token_id: Mapped[int | None] = mapped_column(Integer)
@@ -238,3 +248,29 @@ class RedeemCode(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     redeemed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserProviderKey(Base):
+    """A user's own provider credential. When present and enabled, tasks for that provider skip new-api."""
+
+    __tablename__ = "user_provider_keys"
+    __table_args__ = (UniqueConstraint("user_id", "provider"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    api_key_enc: Mapped[str | None] = mapped_column(Text)
+    base_url: Mapped[str] = mapped_column(String(1000), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="provider_keys")
+
+
+class SiteSetting(Base):
+    """Admin-editable values. Missing keys fall back to environment defaults."""
+
+    __tablename__ = "site_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
