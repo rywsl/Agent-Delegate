@@ -69,6 +69,15 @@ class Settings:
     default_budget_usd: float
     max_budget_usd: float
     min_balance_usd: float
+    sandbox_usd_per_minute: float
+    free_sandbox_minutes: float
+    max_queued_tasks: int
+    max_queued_per_user: int
+    harness_volume: str
+    gemini_models: list[str]
+    grok_models: list[str]
+    pi_models: list[str]
+    deepseek_models: list[str]
     default_timeout_s: int
     max_timeout_s: int
     default_max_turns: int
@@ -89,7 +98,14 @@ class Settings:
         return self.data_dir / "uploads"
 
     def models_for(self, agent: str) -> list[str]:
-        return self.claude_models if agent == "claude" else self.codex_models
+        return {
+            "claude": self.claude_models,
+            "codex": self.codex_models,
+            "gemini": self.gemini_models,
+            "grok": self.grok_models,
+            "pi": self.pi_models,
+            "deepseek": self.deepseek_models,
+        }.get(agent) or self.claude_models
 
     def usd_to_quota(self, usd: float) -> int:
         return int(round(usd * self.newapi_quota_per_unit))
@@ -148,13 +164,22 @@ def get_settings() -> Settings:
         sandbox_memory=_env("SANDBOX_MEMORY", "4g"),
         sandbox_cpus=_float("SANDBOX_CPUS", 2.0),
         sandbox_pids=_int("SANDBOX_PIDS", 1024),
-        agents=_list("DELEGATE_AGENTS", "claude,codex"),
+        agents=_list("DELEGATE_AGENTS", "claude,codex,gemini,grok,pi,deepseek"),
         default_agent=_env("DELEGATE_DEFAULT_AGENT", "claude"),
         claude_models=_list("DELEGATE_CLAUDE_MODELS", "claude-sonnet-5-5,claude-opus-5-5,claude-haiku-5-5"),
         codex_models=_list("DELEGATE_CODEX_MODELS", "gpt-5.5-codex,gpt-5.5"),
         default_budget_usd=_float("DELEGATE_DEFAULT_BUDGET_USD", 5.0),
         max_budget_usd=_float("DELEGATE_MAX_BUDGET_USD", 50.0),
         min_balance_usd=_float("DELEGATE_MIN_BALANCE_USD", 0.10),
+        sandbox_usd_per_minute=_float("DELEGATE_SANDBOX_USD_PER_MINUTE", 0.02),
+        free_sandbox_minutes=_float("DELEGATE_FREE_SANDBOX_MINUTES", 60),
+        max_queued_tasks=_int("DELEGATE_MAX_QUEUED_TASKS", 200),
+        max_queued_per_user=_int("DELEGATE_MAX_QUEUED_PER_USER", 8),
+        harness_volume=_env("DELEGATE_HARNESS_VOLUME", "delegate_harness_bin") or "",
+        gemini_models=_list("DELEGATE_GEMINI_MODELS", "gemini-3-pro-preview,gemini-2.5-flash"),
+        grok_models=_list("DELEGATE_GROK_MODELS", "grok-4,grok-4-fast"),
+        pi_models=_list("DELEGATE_PI_MODELS", "gpt-5.5,claude-sonnet-5-5"),
+        deepseek_models=_list("DELEGATE_DEEPSEEK_MODELS", "deepseek-v4-pro,deepseek-v4-flash"),
         default_timeout_s=_int("DELEGATE_DEFAULT_TIMEOUT", 3600),
         max_timeout_s=_int("DELEGATE_MAX_TIMEOUT", 4 * 3600),
         default_max_turns=_int("DELEGATE_DEFAULT_MAX_TURNS", 200),

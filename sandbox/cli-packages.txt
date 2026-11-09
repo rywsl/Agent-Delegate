@@ -1,0 +1,6 @@
+@anthropic-ai/claude-code
+@openai/codex
+@google/gemini-cli
+@xai-official/grok
+@earendil-works/pi-coding-agent
+@deepseek-ai/dsh

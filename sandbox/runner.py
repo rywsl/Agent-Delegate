@@ -271,7 +271,33 @@ def collect_patch(baseline: str) -> dict:
 
 
 # --------------------------------------------------------------------------- agents
+# Applied to every CLI. Claude Code in particular phones home unless these are set.
+TELEMETRY_OFF = {
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DO_NOT_TRACK": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "GEMINI_CLI_TELEMETRY": "0",
+    "GROK_TELEMETRY_DISABLED": "1",
+    "PI_TELEMETRY": "0",
+    "DSH_TELEMETRY": "0",
+    "IS_SANDBOX": "1",
+}
+
+
+def _auth(spec: dict) -> tuple[str, str, str]:
+    """Return (base_url, api_key, env var the key was read from). The key never goes into argv."""
+    auth = spec.get("auth") or {}
+    if auth:
+        env_name = "DELEGATE_LLM_API_KEY" if auth.get("mode") == "byok" else "DELEGATE_GATEWAY_KEY"
+        return (auth.get("base_url") or "").rstrip("/"), os.environ[env_name], env_name
+    return spec["gateway_url"].rstrip("/"), os.environ["DELEGATE_GATEWAY_KEY"], "DELEGATE_GATEWAY_KEY"
+
+
 def claude_command(spec: dict) -> tuple[list[str], dict, str]:
+    base, key, _env_name = _auth(spec)
     cmd = [
         "claude",
         "-p",
@@ -286,22 +312,24 @@ def claude_command(spec: dict) -> tuple[list[str], dict, str]:
     ]
     env = {
         # Bearer auth against the gateway; the per-task key is the only credential in the sandbox.
-        "ANTHROPIC_BASE_URL": spec["gateway_url"],
-        "ANTHROPIC_AUTH_TOKEN": os.environ["DELEGATE_GATEWAY_KEY"],
+        "ANTHROPIC_BASE_URL": base,
+        "ANTHROPIC_AUTH_TOKEN": key,
+        "ANTHROPIC_API_KEY": key,
         "ANTHROPIC_MODEL": spec["model"],
         # Background work and subagents must use models the gateway actually serves.
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": spec.get("small_model") or spec["model"],
         "CLAUDE_CODE_SUBAGENT_MODEL": spec["model"],
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        "DISABLE_TELEMETRY": "1",
-        "DISABLE_AUTOUPDATER": "1",
-        "DISABLE_ERROR_REPORTING": "1",
-        "IS_SANDBOX": "1",
+        **TELEMETRY_OFF,
     }
     return cmd, env, spec["prompt"]
 
 
 def codex_command(spec: dict) -> tuple[list[str], dict, str]:
+    if spec.get("auth"):
+        base, key, env_name = _auth(spec)
+    else:
+        base = spec["gateway_url"].rstrip("/") + "/v1"
+        key, env_name = os.environ["DELEGATE_GATEWAY_KEY"], "DELEGATE_GATEWAY_KEY"
     codex_home = Path(os.environ.get("HOME", "/home/agent")) / ".codex"
     codex_home.mkdir(parents=True, exist_ok=True)
     (codex_home / "config.toml").write_text(
@@ -327,13 +355,14 @@ def codex_command(spec: dict) -> tuple[list[str], dict, str]:
                 "",
                 "[model_providers.delegate]",
                 'name = "delegate"',
-                f"base_url = {json.dumps(spec['gateway_url'] + '/v1')}",
-                'env_key = "DELEGATE_GATEWAY_KEY"',
+                f"base_url = {json.dumps(base)}",
+                f"env_key = {json.dumps(env_name)}",
                 'wire_api = "responses"',
                 "",
             ]
         )
     )
+    os.environ[env_name] = key
     cmd = [
         "codex",
         "exec",
@@ -347,13 +376,95 @@ def codex_command(spec: dict) -> tuple[list[str], dict, str]:
     ]
     # codex has no separate system-prompt flag for exec; prepend the delegation contract.
     prompt = spec["system_prompt"] + "\n\n---\n\nTASK:\n" + spec["prompt"]
-    return cmd, {"CODEX_HOME": str(codex_home)}, prompt
+    return cmd, {"CODEX_HOME": str(codex_home), env_name: key, **TELEMETRY_OFF}, prompt
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload))
+
+
+def gemini_command(spec: dict) -> tuple[list[str], dict, str]:
+    base, key, _env_name = _auth(spec)
+    home = Path(os.environ.get("HOME", "/home/agent")) / ".gemini"
+    _write_json(home / "settings.json", {
+        "telemetry": {"enabled": False, "logUserPrompts": False},
+        "usageStatisticsEnabled": False,
+        "security": {"auth": {"selectedType": "gemini-api-key"}},
+    })
+    cmd = ["gemini", "--yolo", "--output-format", "stream-json", "-m", spec["model"], "-p", spec["prompt"]]
+    env = {
+        **TELEMETRY_OFF,
+        "GEMINI_API_KEY": key,
+        "GOOGLE_API_KEY": key,
+        "GEMINI_MODEL": spec["model"],
+        "GOOGLE_GEMINI_BASE_URL": base,
+    }
+    return cmd, env, ""
+
+
+def grok_command(spec: dict) -> tuple[list[str], dict, str]:
+    base, key, _env_name = _auth(spec)
+    cmd = ["grok", "-p", spec["prompt"], "--model", spec["model"]]
+    env = {
+        **TELEMETRY_OFF,
+        "XAI_API_KEY": key,
+        "XAI_BASE_URL": base,
+        "OPENAI_API_KEY": key,
+        "OPENAI_BASE_URL": base,
+    }
+    return cmd, env, ""
+
+
+def pi_command(spec: dict) -> tuple[list[str], dict, str]:
+    base, key, _env_name = _auth(spec)
+    home = Path(os.environ.get("HOME", "/home/agent")) / ".pi" / "agent"
+    _write_json(home / "models.json", {
+        "providers": {
+            "delegate": {
+                "baseUrl": base,
+                "api": "openai-completions",
+                "apiKey": "$OPENAI_API_KEY",
+                "models": [{
+                    "id": spec["model"],
+                    "name": spec["model"],
+                    "contextWindow": 128000,
+                    "maxTokens": 8192,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                }],
+            }
+        }
+    })
+    _write_json(home / "settings.json", {"telemetry": False, "usageStatisticsEnabled": False})
+    cmd = ["pi", "--print", "--provider", "delegate", "--model", spec["model"], spec["prompt"]]
+    return cmd, {**TELEMETRY_OFF, "OPENAI_API_KEY": key, "OPENAI_BASE_URL": base}, ""
+
+
+def deepseek_command(spec: dict) -> tuple[list[str], dict, str]:
+    base, key, _env_name = _auth(spec)
+    cmd = ["dsh", "--profile", "headless", "--json", "--approval-policy", "never"]
+    env = {
+        **TELEMETRY_OFF,
+        "DEEPSEEK_API_KEY": key,
+        "DEEPSEEK_BASE_URL": base,
+        "OPENAI_API_KEY": key,
+        "OPENAI_BASE_URL": base,
+    }
+    return cmd, env, spec["prompt"]
 
 
 def run_agent(spec: dict) -> int:
     global _child
     agent = spec["agent"]
-    builders = {"claude": claude_command, "codex": codex_command}
+    builders = {
+        "claude": claude_command,
+        "codex": codex_command,
+        "gemini": gemini_command,
+        "grok": grok_command,
+        "pi": pi_command,
+        "deepseek": deepseek_command,
+    }
     if agent not in builders:
         phase("error", f"unknown agent {agent!r}")
         return 2
@@ -389,6 +500,8 @@ def run_agent(spec: dict) -> int:
     except BrokenPipeError:
         pass
     assert _child.stdout
+    saw_result = False
+    plain: list[str] = []
     for line in _child.stdout:
         line = line.strip()
         if not line:
@@ -396,10 +509,23 @@ def run_agent(spec: dict) -> int:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
+            plain.append(line)
             emit({"t": "stderr", "line": line})
             continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            saw_result = True
         emit({"t": "agent", "agent": agent, "event": event})
     code = _child.wait()
+    if not saw_result:
+        text = "\n".join(plain)
+        emit({"t": "agent", "agent": agent, "event": {
+            "type": "result",
+            "subtype": "success" if code == 0 else "error",
+            "is_error": code != 0,
+            "result": text or (f"harness exited with code {code}" if code else ""),
+            "num_turns": 1,
+            "usage": {},
+        }})
     stderr_thread.join(timeout=5)
     return code
 

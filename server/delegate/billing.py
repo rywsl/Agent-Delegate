@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import secrets
 import threading
@@ -29,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from . import audit
 from .config import get_settings
-from .models import LedgerEntry, RedeemCode, Task, User, utcnow
+from .models import LedgerEntry, RedeemCode, Task, User, UserProviderKey, utcnow
 from .newapi import LOG_TYPE_ALL, LOG_TYPE_CONSUME, MIRROR_PAT_SCOPES, ROOT_PAT_SCOPES, NewApi, NewApiError
 from .security import decrypt, encrypt, random_password
 
@@ -437,6 +438,131 @@ def create_codes(db: Session, quota: int, count: int, *, actor: str, note: str =
                           note=note, created_by=actor, expires_at=expires))
         codes.append(code)
     return codes
+
+
+def sandbox_charge_parts(
+    seconds: float, free_seconds: int, usd_per_minute: float, quota_per_unit: int,
+) -> tuple[int, int, int]:
+    """Round a sandbox run up to the next minute. Free seconds are spent before the wallet.
+
+    Returns (billed_seconds, free_seconds_used, quota_cost).
+    """
+    if seconds <= 0 or usd_per_minute < 0:
+        return 0, 0, 0
+    billed_seconds = math.ceil(seconds / 60) * 60
+    free_used = min(max(int(free_seconds), 0), billed_seconds)
+    paid_minutes = (billed_seconds - free_used) / 60
+    quota = int(round(paid_minutes * usd_per_minute * quota_per_unit))
+    return billed_seconds, free_used, quota
+
+
+def mode_for(db: Session, user: User, agent: str) -> str:
+    """Custom key for this harness's provider wins; otherwise the platform gateway is the fallback."""
+    from . import harness
+
+    try:
+        provider = harness.get(agent).provider
+    except KeyError:
+        return "platform"
+    row = (
+        db.query(UserProviderKey)
+        .filter_by(user_id=user.id, provider=provider, enabled=True)
+        .one_or_none()
+    )
+    if row is not None and row.api_key_enc:
+        return "byok"
+    return "platform"
+
+
+def provider_key(db: Session, user: User, agent: str) -> UserProviderKey | None:
+    from . import harness
+
+    provider = harness.get(agent).provider
+    return (
+        db.query(UserProviderKey)
+        .filter_by(user_id=user.id, provider=provider, enabled=True)
+        .one_or_none()
+    )
+
+
+def affordable_sandbox_seconds(db: Session, user: User) -> int:
+    """How long a bring-your-own-key task can run before the free grant and wallet run out."""
+    from .site import ensure_free_seconds, sandbox_usd_per_minute
+
+    price = sandbox_usd_per_minute(db)
+    free = ensure_free_seconds(db, user)
+    if price <= 0:
+        return get_settings().max_timeout_s
+    balance = balance_quota(user) or 0
+    paid = int(balance / max(get_settings().usd_to_quota(price) / 60, 1))
+    return free + paid
+
+
+def assert_can_submit(db: Session, user: User, agent: str) -> str:
+    mode = mode_for(db, user, agent)
+    if mode == "platform":
+        check_can_start(db, user)
+        return mode
+    if affordable_sandbox_seconds(db, user) < 60:
+        raise BillingError("sandbox time is used up and the balance cannot cover another minute", 402)
+    return mode
+
+
+def charge_sandbox(db: Session, task: Task, seconds: float) -> None:
+    """Bill a finished bring-your-own-key task for the time its container actually ran."""
+    from .site import ensure_free_seconds, sandbox_usd_per_minute
+
+    if task.billing_mode != "byok" or task.sandbox_started_at is None:
+        return
+    user = db.get(User, task.user_id)
+    if user is None:
+        return
+    price = sandbox_usd_per_minute(db)
+    free = ensure_free_seconds(db, user)
+    billed_seconds, free_used, quota = sandbox_charge_parts(
+        seconds, free, price, get_settings().newapi_quota_per_unit,
+    )
+    user.sandbox_free_seconds = free - free_used
+    task.sandbox_billed_seconds = billed_seconds
+    task.sandbox_free_seconds_used = free_used
+    task.sandbox_billed_quota = 0
+    if quota <= 0:
+        audit.record(db, "billing.sandbox", actor="system", user_id=user.id, target=task.id,
+                     seconds=billed_seconds, free_seconds=free_used, quota=0)
+        return
+    balance = balance_quota(user) or 0
+    debit = min(quota, max(balance, 0))
+    shortfall = quota - debit
+    task.sandbox_billed_quota = debit
+    if debit > 0:
+        adjust(db, user, -debit, kind="sandbox_time", actor="system",
+               note=f"sandbox {billed_seconds}s on {task.id}")
+    audit.record(db, "billing.sandbox", actor="system", user_id=user.id, target=task.id,
+                 seconds=billed_seconds, free_seconds=free_used, quota=debit, shortfall=shortfall)
+    if shortfall:
+        extra = f"sandbox charge short by {get_settings().quota_to_usd(shortfall):.4f} USD"
+        task.status_reason = f"{task.status_reason}; {extra}" if task.status_reason else extra
+
+
+def admin_session() -> NewApi:
+    """A short-lived root dashboard session. Channel administration is not on the site's scoped PAT."""
+    stored = _stored_root()
+    password = decrypt(stored["password_enc"]) if stored.get("password_enc") else None
+    if not password:
+        bootstrap()
+        stored = _stored_root()
+        password = decrypt(stored["password_enc"])
+    username = stored.get("username") or get_settings().newapi_root_username
+    user_id, client = _base().login(username, password)
+    client.actor_id = user_id
+    return client
+
+
+def admin_call(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    try:
+        return fn(admin_session(), *args, **kwargs)
+    except NewApiError as exc:
+        raise BillingError(str(exc)) from exc
 
 
 def redeem(db: Session, user: User, code: str, *, actor: str, request: Any = None) -> int:

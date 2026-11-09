@@ -20,6 +20,7 @@ from ..config import get_settings
 from ..db import new_session
 from ..models import ApiKey, Task, TaskStatus, Upload, UploadStatus, User, utcnow
 from ..tasks import (
+    QueueFull,
     TaskInput,
     TaskInputError,
     create_task,
@@ -59,12 +60,17 @@ def _actor(api_key: ApiKey) -> str:
 
 
 @router.get("/me")
-def me(principal: tuple[User, ApiKey] = Depends(api_principal)) -> dict[str, Any]:
+def me(principal: tuple[User, ApiKey] = Depends(api_principal), db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = principal
+    from ..site import ensure_free_seconds
+
     balance = billing.balance_quota(user)
+    agent = user.pref_agent if user.pref_agent in get_settings().agents else get_settings().default_agent
     return {
         "email": user.email,
         "balance_usd": round(get_settings().quota_to_usd(balance), 4) if balance is not None else None,
+        "sandbox_free_seconds": ensure_free_seconds(db, user),
+        "billing_mode": billing.mode_for(db, user, agent),
     }
 
 
@@ -76,7 +82,6 @@ def submit_task(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     user, api_key = principal
-    billing.check_can_start(db, user)
     client = {
         "ip": audit.client_ip(request),
         "client": request.headers.get("x-delegate-client") or request.headers.get("user-agent"),
@@ -98,6 +103,8 @@ def submit_task(
             client_info=client,
             request=request,
         )
+    except QueueFull as exc:
+        raise HTTPException(429, str(exc)) from exc
     except TaskInputError as exc:
         raise HTTPException(422, str(exc)) from exc
     return public_view(db, task)

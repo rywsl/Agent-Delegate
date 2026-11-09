@@ -100,7 +100,6 @@ async def task_new(
 ):
     upload_ids: list[str] = []
     try:
-        billing.check_can_start(db, user)
         if archive is not None and archive.filename:
             name = archive.filename.replace("\\", "/").rsplit("/", 1)[-1]
             dest = "." if name.endswith((".zip", ".tar", ".tar.gz", ".tgz")) else name
@@ -368,12 +367,15 @@ def settings_save(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    from ..site import offered_models
+
     s = get_settings()
     if agent not in s.agents:
         flash(request, "不支持的 agent", "error")
         return RedirectResponse("/settings", status_code=303)
-    if model not in s.models_for(agent):
-        model = s.models_for(agent)[0]
+    models = offered_models(db, agent)
+    if model not in models:
+        model = models[0]
     before = {"agent": user.pref_agent, "model": user.pref_model, "budget": user.pref_budget_usd,
               "timeout": user.pref_timeout_s}
     user.pref_agent = agent

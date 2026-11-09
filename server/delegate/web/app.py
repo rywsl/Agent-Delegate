@@ -8,7 +8,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
@@ -16,10 +16,36 @@ from starlette.middleware.sessions import SessionMiddleware
 from .. import billing
 from ..config import ensure_data_dirs, get_settings
 from ..db import init_db, new_session
-from . import routes_admin, routes_api, routes_auth, routes_pages
+from . import routes_admin, routes_api, routes_auth, routes_console, routes_pages
 from .deps import LoginRequired, current_user, render
 
 log = logging.getLogger("delegate.web")
+
+
+def _console_dist() -> Path | None:
+    candidates = [
+        Path(os.environ["DELEGATE_CONSOLE_DIST"]) if os.environ.get("DELEGATE_CONSOLE_DIST") else None,
+        Path(__file__).resolve().parents[3] / "web" / "dist",
+        Path("/app/web/dist"),
+    ]
+    for path in candidates:
+        if path is not None and (path / "index.html").is_file():
+            return path
+    return None
+
+
+def _serve_console(app: FastAPI, dist: Path) -> None:
+    """Serve the built console, including paths the SPA does not map to files."""
+    root = dist.resolve()
+
+    @app.get("/app", include_in_schema=False)
+    @app.get("/app/{rest:path}", include_in_schema=False)
+    def console_spa(rest: str = ""):
+        if rest:
+            candidate = (root / rest).resolve()
+            if candidate.is_file() and (candidate == root or root in candidate.parents):
+                return FileResponse(candidate)
+        return FileResponse(root / "index.html")
 
 
 def _bootstrap_sidecar() -> None:
@@ -51,9 +77,13 @@ def create_app() -> FastAPI:
     )
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
     app.include_router(routes_api.router)
+    app.include_router(routes_console.router)
     app.include_router(routes_auth.router)
     app.include_router(routes_pages.router)
     app.include_router(routes_admin.router)
+    console_dist = _console_dist()
+    if console_dist is not None:
+        _serve_console(app, console_dist)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():

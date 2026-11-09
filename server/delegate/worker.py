@@ -12,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select, update
 
-from . import audit, billing, sandbox, transfer
+from . import audit, billing, harness, sandbox, transfer
 from .config import ensure_data_dirs, get_settings
 from .db import init_db, session_scope
 from .events import NormEvent, Normalizer
@@ -99,7 +99,7 @@ class Watchdog(threading.Thread):
                 return
 
 
-def build_spec(task: Task) -> dict:
+def build_spec(task: Task, auth: dict) -> dict:
     s = get_settings()
     repo_full = decrypt(task.repo_url_enc) if task.repo_url_enc else task.repo_url
     return {
@@ -114,9 +114,26 @@ def build_spec(task: Task) -> dict:
         "repo_display": task.repo_url,
         "repo_ref": task.repo_ref,
         "gateway_url": s.sandbox_newapi_url,
+        "auth": auth,
         "uploads": [{"id": u["id"], "dest": u["dest"], "kind": u["kind"]} for u in task.uploads or []],
         "max_output_bytes": s.max_output_bytes,
     }
+
+
+def _credentials(session, task: Task) -> tuple[str, dict]:
+    """Return (api key, auth block). The auth block is written into the task spec and contains no secret."""
+    info = harness.get(task.agent)
+    if task.billing_mode == "byok":
+        row = billing.provider_key(session, session.get(User, task.user_id), task.agent)
+        if row is None or not row.api_key_enc:
+            raise billing.BillingError("custom provider key disappeared before the task started", 402)
+        base = (row.base_url or "").strip() or info.default_base_url
+        return decrypt(row.api_key_enc), {"mode": "byok", "base_url": base.rstrip("/")}
+    key = billing.open_task_token(session, session.get(User, task.user_id), task)
+    base = get_settings().sandbox_newapi_url.rstrip("/")
+    if info.platform_openai_v1:
+        base = f"{base}/v1"
+    return key, {"mode": "platform", "base_url": base}
 
 
 def load_files(task: Task) -> dict[str, bytes]:
@@ -149,13 +166,17 @@ def run_task(task_id: str) -> None:
         sink.note("phase", f"[prepare] worker picked up the task ({agent}, {model})")
         with session_scope() as session:
             task = session.get(Task, task_id)
-            gateway_key = billing.open_task_token(session, session.get(User, task.user_id), task)
-            spec = build_spec(task)
+            gateway_key, auth = _credentials(session, task)
+            spec = build_spec(task, auth)
             files = load_files(task)
             uploads = upload_files(task)
             token_name, budget_quota = task.newapi_token_name, task.budget_quota
-        sink.note("phase", f"[billing] budget {s.quota_to_usd(budget_quota):.2f} USD on gateway key {token_name}",
-                  token=token_name, budget_quota=budget_quota)
+            mode = task.billing_mode
+        if mode == "byok":
+            sink.note("phase", "[billing] using the account's own provider key; the sandbox is billed by time")
+        else:
+            sink.note("phase", f"[billing] budget {s.quota_to_usd(budget_quota):.2f} USD on gateway key {token_name}",
+                      token=token_name, budget_quota=budget_quota)
 
         container = sandbox.create_and_start(
             sandbox.SandboxSpec(
@@ -169,6 +190,7 @@ def run_task(task_id: str) -> None:
             task.container_name = container.name
             task.sandbox_image = s.sandbox_image
             task.sandbox_limits = sandbox.limits()
+            task.sandbox_started_at = utcnow()
             timeout_s = task.timeout_s
         sink.note("phase", f"[sandbox] container {container.name} started", container_id=container.id, **sandbox.limits())
 
@@ -221,6 +243,16 @@ def run_task(task_id: str) -> None:
         task.status_reason = reason
         task.exit_code = exit_code
         task.finished_at = utcnow()
+        if task.billing_mode == "byok" and task.sandbox_started_at is not None:
+            started = task.sandbox_started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            elapsed = (task.finished_at - started).total_seconds()
+            try:
+                billing.charge_sandbox(session, task, elapsed)
+            except billing.BillingError as exc:
+                log.warning("sandbox charge for %s failed: %s", task.id, exc)
+                task.status_reason = f"{task.status_reason}; sandbox charge failed: {exc}" if task.status_reason else f"sandbox charge failed: {exc}"
         task.result_text = normalizer.final_message or ("" if status == TaskStatus.SUCCEEDED else reason)
         task.patch_stats = patch_stats
         task.outputs = outputs

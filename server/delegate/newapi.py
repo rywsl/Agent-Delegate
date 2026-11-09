@@ -64,12 +64,17 @@ class NewApi:
         self.token = token
         self.timeout = timeout
         self.transport = transport
+        self.actor_id: int | None = None
 
     def with_token(self, token: str) -> NewApi:
-        return NewApi(self.base_url, token, timeout=self.timeout, transport=self.transport)
+        client = NewApi(self.base_url, token, timeout=self.timeout, transport=self.transport)
+        client.actor_id = self.actor_id
+        return client
 
     def call(self, method: str, path: str, *, headers: dict[str, str] | None = None, **kwargs: Any) -> Any:
         all_headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        if self.actor_id is not None:
+            all_headers["New-Api-User"] = str(self.actor_id)
         all_headers.update(headers or {})
         try:
             with httpx.Client(base_url=self.base_url, timeout=self.timeout, transport=self.transport) as client:
@@ -186,3 +191,21 @@ class NewApi:
 
     def delete_token(self, token_id: int) -> None:
         self.call("DELETE", f"/api/token/{token_id}")
+
+    # ------------------------------------------------------------------ channels (root dashboard session)
+    def list_channels(self) -> list[dict[str, Any]]:
+        items, _ = _items(self.call("GET", "/api/channel/", params={"p": 1, "page_size": 100}))
+        return items
+
+    def create_channel(self, channel: dict[str, Any]) -> None:
+        self.call("POST", "/api/channel/", json={"mode": "single", "channel": channel})
+
+    def update_channel(self, channel: dict[str, Any]) -> None:
+        self.call("PUT", "/api/channel/", json=channel)
+
+    def delete_channel(self, channel_id: int) -> None:
+        self.call("DELETE", f"/api/channel/{channel_id}/")
+
+    def test_channel(self, channel_id: int, model: str = "") -> Any:
+        params = {"model": model} if model else None
+        return self.call("GET", f"/api/channel/test/{channel_id}", params=params)

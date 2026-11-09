@@ -142,10 +142,12 @@ class Normalizer:
             event = envelope.get("event")
             if not isinstance(event, dict):
                 return [NormEvent("log", clip(event), {"event": shrink(event)})]
-            if agent == "claude":
-                return self._claude(event)
             if agent == "codex":
                 return self._codex(event)
+            # Claude Code's stream-json, plus the synthetic result other CLIs get when they
+            # only print plain text. A result event is what closes the task.
+            if agent == "claude" or event.get("type") == "result":
+                return self._claude(event)
             return [NormEvent("log", clip(event), shrink(event))]
         return [NormEvent("log", clip(envelope), shrink(envelope))]
 
