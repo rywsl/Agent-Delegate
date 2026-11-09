@@ -19,6 +19,7 @@ from ..tasks import (
 )
 from .deps import flash, get_db, login_session, render, require_user, verify_csrf
 from .routes_api import artifact_response
+from .routes_auth import console_redirect
 
 router = APIRouter()
 PAGE_SIZE = 25
@@ -31,6 +32,8 @@ def _page(page: int) -> tuple[int, int]:
 
 @router.get("/dashboard")
 def dashboard(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    if jump := console_redirect(request):
+        return jump
     counts = dict(db.execute(select(Task.status, func.count()).where(Task.user_id == user.id).group_by(Task.status)).all())
     recent = db.scalars(select(Task).where(Task.user_id == user.id).order_by(Task.created_at.desc()).limit(8)).all()
     has_key = db.scalar(select(func.count()).select_from(ApiKey).where(

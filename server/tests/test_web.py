@@ -135,6 +135,72 @@ def test_raw_file_upload_needs_destination(client, env):
     assert resp.status_code == 400 and "destination" in resp.json()["error"]
 
 
+def test_console_api_matches_site_flow(client, env):
+    session = client.get("/api/console/session")
+    assert session.status_code == 200
+    csrf = session.json()["csrf"]
+    assert session.json()["user"] is None
+    assert client.get("/api/console/dashboard").status_code == 401
+
+    created = client.post("/api/console/register", headers={"X-CSRF-Token": csrf}, json={
+        "email": "console@example.com", "password": "password123", "display_name": "Console User",
+    })
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["user"]["is_admin"] is True and body["user"]["display_name"] == "Console User"
+    csrf = body["csrf"]
+
+    dash = client.get("/api/console/dashboard").json()
+    assert dash["total"] == 0 and dash["sandbox"]["capacity"] >= 1
+
+    task = client.post("/api/console/tasks", headers={"X-CSRF-Token": csrf}, json={
+        "task": "Fix the failing test\nmore", "harness": "codex",
+    })
+    assert task.status_code == 201, task.text
+    task_id = task.json()["id"]
+    assert task.json()["status"] == "queued"
+    assert task.json()["harness"] == "codex"
+    assert task.json()["prompt"].startswith("Fix the failing test")
+    assert task.json()["events"] == []
+
+    listed = client.get("/api/console/tasks").json()["tasks"]
+    assert listed[0]["id"] == task_id
+    detail = client.get(f"/api/console/tasks/{task_id}").json()
+    assert detail["model"]
+    events = client.get(f"/api/console/tasks/{task_id}/events").json()
+    assert events["finished"] is False and events["events"] == []
+
+    cancelled = client.post(f"/api/console/tasks/{task_id}/cancel", headers={"X-CSRF-Token": csrf})
+    assert cancelled.status_code == 200
+    assert client.get(f"/api/console/tasks/{task_id}").json()["status"] == "cancelled"
+
+    key = client.post("/api/console/keys", headers={"X-CSRF-Token": csrf}, json={"name": "laptop"})
+    assert key.status_code == 201 and key.json()["token"].startswith("dlg_")
+    visible = client.get("/api/console/keys").json()["keys"]
+    assert visible[0]["name"] == "laptop" and "token" not in visible[0]
+    revoked = client.post(f"/api/console/keys/{visible[0]['id']}/revoke", headers={"X-CSRF-Token": csrf})
+    assert revoked.json()["key"]["active"] is False
+
+    providers = client.get("/api/console/providers").json()
+    assert {row["id"] for row in providers["providers"]} == {"anthropic", "openai", "gemini"}
+    saved = client.post("/api/console/providers/openai", headers={"X-CSRF-Token": csrf}, json={
+        "base_url": "https://openai.example.com/v1", "api_key": "sk-private", "enabled": True,
+    })
+    assert saved.status_code == 200
+    openai = next(row for row in saved.json()["providers"] if row["id"] == "openai")
+    assert openai["base_url"] == "https://openai.example.com/v1" and openai["configured"]
+    assert "sk-private" not in saved.text
+    check = client.post("/api/console/providers/openai/check", headers={"X-CSRF-Token": csrf})
+    assert check.json()["ok"] is True
+
+    actions = [row["action"] for row in client.get("/api/console/audit").json()["logs"]]
+    for expected in ("auth.register", "task.create", "task.cancel", "apikey.create", "apikey.revoke", "admin.provider_update"):
+        assert expected in actions, expected
+
+    client.post("/api/console/logout", headers={"X-CSRF-Token": csrf})
+    assert client.get("/api/console/tasks").status_code == 401
+
+
 def test_csrf_required(client, env):
     resp = client.post("/login", data={"email": "a@b.c", "password": "x"})
     assert resp.status_code == 403

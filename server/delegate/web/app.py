@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from ..config import get_settings
 from ..db import init_db, new_session
-from . import routes_admin, routes_api, routes_auth, routes_pages
+from . import routes_admin, routes_api, routes_auth, routes_console, routes_pages
 from .deps import LoginRequired, current_user, render
 
 
@@ -31,9 +31,13 @@ def create_app() -> FastAPI:
                        max_age=s.session_max_age, same_site="lax", https_only=s.cookie_secure)
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
     app.include_router(routes_api.router)
+    app.include_router(routes_console.router)
     app.include_router(routes_auth.router)
     app.include_router(routes_pages.router)
     app.include_router(routes_admin.router)
+    console_dist = Path(__file__).resolve().parents[3] / "web" / "dist"
+    if console_dist.is_dir():
+        app.mount("/app", StaticFiles(directory=str(console_dist), html=True), name="console")
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():
@@ -41,6 +45,8 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(LoginRequired)
     async def _login_required(request: Request, _exc: LoginRequired):
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "login required"}, status_code=401)
         return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
 
     @app.exception_handler(HTTPException)

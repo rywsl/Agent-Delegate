@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import re
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
@@ -17,15 +19,29 @@ from .deps import current_user, flash, get_db, login_session, render, verify_csr
 log = logging.getLogger(__name__)
 router = APIRouter()
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+CONSOLE_INDEX = Path(__file__).resolve().parents[3] / "web" / "dist" / "index.html"
+
+
+def console_redirect(request: Request) -> RedirectResponse | None:
+    """Browser visits land on the new console. API tests still receive the HTML site."""
+    if not CONSOLE_INDEX.is_file():
+        return None
+    if "text/html" not in request.headers.get("accept", ""):
+        return None
+    return RedirectResponse("/app/", status_code=303)
 
 
 @router.get("/")
-def index(user: User | None = Depends(current_user)):
+def index(request: Request, user: User | None = Depends(current_user)):
+    if jump := console_redirect(request):
+        return jump
     return RedirectResponse("/dashboard" if user else "/login", status_code=303)
 
 
 @router.get("/login")
 def login_page(request: Request, user: User | None = Depends(current_user)):
+    if jump := console_redirect(request):
+        return jump
     if user:
         return RedirectResponse("/dashboard", status_code=303)
     return render(request, "login.html")
@@ -61,6 +77,8 @@ def logout(request: Request, user: User | None = Depends(current_user), db: Sess
 
 @router.get("/register")
 def register_page(request: Request):
+    if jump := console_redirect(request):
+        return jump
     if not get_settings().allow_registration:
         return render(request, "login.html", error="当前未开放注册")
     return render(request, "register.html")

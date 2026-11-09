@@ -7,3 +7,5 @@ data/
 *.egg-info/
 *.pyc
 *.pyo
+web/node_modules/
+web/dist/
