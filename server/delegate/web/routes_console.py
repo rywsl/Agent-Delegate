@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -52,9 +52,9 @@ class AuthIn(BaseModel):
 class SettingsIn(BaseModel):
     display_name: str = ""
     agent: str
-    model: str
-    budget_usd: float = 5
-    timeout_min: int = 60
+    model: str = ""
+    budget_usd: float | None = None
+    timeout_min: int | None = None
 
 
 class TaskIn(BaseModel):
@@ -129,17 +129,131 @@ def _envelope(request: Request, db: Session, user: User | None, **payload: Any) 
 
 
 def _task_row(db: Session, task: Task) -> dict[str, Any]:
+    stats = task.patch_stats or {}
     return {
         "id": task.id,
         "title": task.title,
         "status": task.status,
         "agent": task.agent,
+        "harness": task.agent,
         "model": task.model,
+        "source": task.source,
         "billing_mode": task.billing_mode,
         "created_at": _iso(task.created_at),
+        "started_at": _iso(task.started_at),
         "finished_at": _iso(task.finished_at),
+        "duration_s": _duration(task),
+        "timeout_s": task.timeout_s,
+        "max_turns": task.max_turns,
+        "container_name": task.container_name,
+        "sandbox_limits": task.sandbox_limits or {},
+        "patch_stats": {
+            "files": stats.get("files", 0),
+            "insertions": stats.get("insertions", 0),
+            "deletions": stats.get("deletions", 0),
+            "bytes": stats.get("bytes", 0),
+            "paths": (stats.get("paths") or [])[:100],
+        },
+        "agent_usage": task.agent_usage or {},
         "queue_position": queue_position(db, task),
         "cost_usd": round(get_settings().quota_to_usd((task.billed_quota or 0) + (task.sandbox_billed_quota or 0)), 4),
+    }
+
+
+def _duration(task: Task) -> float | None:
+    if task.duration_s:
+        return round(float(task.duration_s), 1)
+    if task.started_at is None:
+        return None
+    end = task.finished_at or utcnow()
+    start = task.started_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return round((end - start).total_seconds(), 1)
+
+
+def _event_view(row: TaskEvent) -> dict[str, Any]:
+    data = row.data or {}
+    tool_args = data.get("input")
+    tool_result = data.get("content") if row.kind == "tool_result" else None
+    stamp = row.ts.astimezone(timezone.utc).strftime("%H:%M:%S") if row.ts else ""
+    return {
+        "id": f"ev-{row.id}",
+        "seq": row.seq,
+        "ts": stamp,
+        "kind": row.kind,
+        "summary": row.summary,
+        "tool_name": data.get("name") or data.get("tool_name"),
+        "tool_args": tool_args if isinstance(tool_args, (dict, str)) else None,
+        "tool_result": tool_result if isinstance(tool_result, str) else None,
+    }
+
+
+def _console_task(db: Session, task: Task, *, detail: bool = False) -> dict[str, Any]:
+    row = _task_row(db, task)
+    row["prompt"] = task.prompt if detail else ""
+    row["status_reason"] = task.status_reason
+    row["result_text"] = task.result_text or ""
+    if not detail:
+        return row
+    view = public_view(db, task)
+    patch = view.get("patch") or {}
+    outputs = (view.get("outputs") or {}).get("files") or []
+    row["raw_patch"] = patch.get("inline")
+    row["outputs"] = [{"path": item["path"], "size": item.get("size", 0), "downloadUrl": item.get("url")} for item in outputs]
+    if view.get("billing"):
+        row["billing"] = view["billing"]
+    events = db.scalars(select(TaskEvent).where(TaskEvent.task_id == task.id).order_by(TaskEvent.seq).limit(500)).all()
+    row["events"] = [_event_view(item) for item in events]
+    return row
+
+
+def _heatmap(tasks: list[Task]) -> dict[str, Any]:
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=52 * 7 - 1)
+    buckets = [0] * (52 * 7)
+    lines = 0
+    month_lines: dict[str, int] = {}
+    peak_value = 0
+    peak_date = ""
+    for task in tasks:
+        created = task.created_at
+        if created is None:
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        day = created.astimezone(timezone.utc).date()
+        stats = task.patch_stats or {}
+        changed = int(stats.get("insertions") or 0) + int(stats.get("deletions") or 0)
+        lines += changed
+        index = (day - start).days
+        if 0 <= index < len(buckets):
+            buckets[index] += changed or (1 if task.status == TaskStatus.SUCCEEDED else 0)
+            if buckets[index] > peak_value:
+                peak_value = buckets[index]
+                peak_date = day.strftime("%b %d, %Y")
+        label = day.strftime("%B")
+        month_lines[label] = month_lines.get(label, 0) + changed
+    peak_level = max(buckets) or 1
+    cells = [0 if value == 0 else min(4, max(1, round(value / peak_level * 4))) for value in buckets]
+    months: list[str] = []
+    seen: set[str] = set()
+    cursor = start
+    while cursor <= today:
+        label = cursor.strftime("%b")
+        if label not in seen:
+            months.append(label)
+            seen.add(label)
+        cursor += timedelta(days=1)
+    active = max(month_lines, key=month_lines.get) if month_lines else ""
+    return {
+        "cells": cells,
+        "months": months,
+        "patch_lines": lines,
+        "active_month": active or "—",
+        "peak_date": peak_date or "—",
     }
 
 
@@ -220,11 +334,33 @@ def dashboard(user: User = Depends(require_user), db: Session = Depends(get_db))
     recent = db.scalars(select(Task).where(Task.user_id == user.id).order_by(Task.created_at.desc()).limit(8)).all()
     global_max, per_user = queue_limits(db)
     waiting = int(db.scalar(select(func.count()).select_from(Task).where(Task.status == TaskStatus.QUEUED)) or 0)
+    owned = db.scalars(select(Task).where(Task.user_id == user.id)).all()
+    tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    for task in owned:
+        usage = task.agent_usage or {}
+        if usage:
+            for key in tokens:
+                tokens[key] += int(usage.get(key) or 0)
+        else:
+            tokens["input_tokens"] += int(task.billed_prompt_tokens or 0)
+            tokens["output_tokens"] += int(task.billed_completion_tokens or 0)
+    prompt_plus_cache = tokens["input_tokens"] + tokens["cache_read_tokens"]
+    settings = get_settings()
+    active = sum(1 for task in owned if task.status in (TaskStatus.PREPARING, TaskStatus.RUNNING))
     return {
         "counts": counts,
         "tasks": [_task_row(db, task) for task in recent],
         "queue": {"waiting": waiting, "max": global_max, "per_user": per_user},
         "sandbox_usd_per_minute": sandbox_usd_per_minute(db),
+        "usage": {**tokens, "tokens": sum(tokens.values()), "cache_rate": round(tokens["cache_read_tokens"] / prompt_plus_cache * 100, 1) if prompt_plus_cache else 0},
+        "heatmap": _heatmap(owned),
+        "sandbox": {
+            "memory": settings.sandbox_memory,
+            "cpus": settings.sandbox_cpus,
+            "capacity": max(1, settings.sandbox_max_concurrent),
+            "active": active,
+            "uid": 10001,
+        },
     }
 
 
@@ -234,7 +370,7 @@ def list_tasks(user: User = Depends(require_user), db: Session = Depends(get_db)
     if status:
         query = query.where(Task.status == status)
     rows = db.scalars(query.order_by(Task.created_at.desc()).limit(100)).all()
-    return {"tasks": [_task_row(db, task) for task in rows]}
+    return {"tasks": [_console_task(db, task) for task in rows]}
 
 
 @router.post("/tasks", status_code=201, dependencies=[Depends(verify_csrf)])
@@ -254,11 +390,7 @@ def task_detail(task_id: str, user: User = Depends(require_user), db: Session = 
     task = get_user_task(db, user, task_id)
     if task is None:
         raise HTTPException(404, "任务不存在")
-    view = public_view(db, task)
-    view["prompt"] = task.prompt
-    view["status_reason"] = task.status_reason
-    view["queue_position"] = queue_position(db, task)
-    return view
+    return _console_task(db, task, detail=True)
 
 
 @router.get("/tasks/{task_id}/events")
@@ -270,10 +402,18 @@ def task_events(task_id: str, after: int = Query(0, ge=0), user: User = Depends(
     rows = db.scalars(
         select(TaskEvent).where(TaskEvent.task_id == task.id, TaskEvent.seq > after).order_by(TaskEvent.seq).limit(500)
     ).all()
+    detail = _console_task(db, task, detail=True)
     return {
-        "events": [{"seq": row.seq, "kind": row.kind, "summary": row.summary, "ts": _iso(row.ts)} for row in rows],
+        "events": [_event_view(row) for row in rows],
         "finished": task.status in TaskStatus.TERMINAL,
         "status": task.status,
+        "status_reason": task.status_reason,
+        "duration_s": detail["duration_s"],
+        "result_text": detail["result_text"],
+        "agent_usage": detail["agent_usage"],
+        "patch_stats": detail["patch_stats"],
+        "raw_patch": detail["raw_patch"],
+        "outputs": detail["outputs"],
     }
 
 
@@ -292,11 +432,13 @@ def save_settings(request: Request, body: SettingsIn, user: User = Depends(requi
     if body.agent not in s.agents:
         raise HTTPException(400, "不支持的 agent")
     models = offered_models(db, body.agent)
-    model = body.model if body.model in models else models[0]
+    model = body.model if body.model in models else (models[0] if models else user.pref_model)
     user.pref_agent = body.agent
     user.pref_model = model
-    user.pref_budget_usd = max(0.01, min(body.budget_usd, s.max_budget_usd))
-    user.pref_timeout_s = max(60, min(body.timeout_min * 60, s.max_timeout_s))
+    if body.budget_usd is not None:
+        user.pref_budget_usd = max(0.01, min(body.budget_usd, s.max_budget_usd))
+    if body.timeout_min is not None:
+        user.pref_timeout_s = max(60, min(body.timeout_min * 60, s.max_timeout_s))
     if body.display_name.strip():
         user.display_name = body.display_name.strip()[:100]
     audit.record(db, "settings.update", actor=f"user:{user.id}", user_id=user.id, request=request, client="console")
@@ -308,7 +450,7 @@ def list_keys(user: User = Depends(require_user), db: Session = Depends(get_db))
     rows = db.scalars(select(ApiKey).where(ApiKey.user_id == user.id).order_by(ApiKey.id.desc())).all()
     return {"keys": [{
         "id": row.id, "name": row.name, "prefix": row.prefix, "active": row.active,
-        "created_at": _iso(row.created_at), "last_used_at": _iso(row.last_used_at),
+        "created_at": _iso(row.created_at), "last_used_at": _iso(row.last_used_at), "last_used_ip": row.last_used_ip,
     } for row in rows]}
 
 
@@ -437,9 +579,11 @@ def audit_page(user: User = Depends(require_user), db: Session = Depends(get_db)
     query = select(AuditLog).where(AuditLog.user_id == user.id)
     total = int(db.scalar(select(func.count()).select_from(query.subquery())) or 0)
     rows = db.scalars(query.order_by(AuditLog.ts.desc()).offset((page - 1) * 30).limit(30)).all()
-    return {"total": total, "page": page, "rows": [{
-        "ts": _iso(row.ts), "action": row.action, "actor": row.actor, "target": row.target,
-    } for row in rows]}
+    payload = [{
+        "id": str(row.id), "ts": _iso(row.ts), "action": row.action, "actor": row.actor,
+        "target": row.target, "ip": row.ip or "", "detail": row.detail or {},
+    } for row in rows]
+    return {"total": total, "page": page, "rows": payload, "logs": payload}
 
 
 # --------------------------------------------------------------------------- admin
