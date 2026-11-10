@@ -4,6 +4,7 @@ export type User = {
   display_name: string;
   is_admin: boolean;
   balance_usd: number | null;
+  points: number;
   sandbox_free_seconds: number;
   billing_mode: string;
 };
@@ -16,6 +17,8 @@ export type Session = {
   models: Record<string, string[]>;
   options: { agent: string; model: string; budget_quota: number; timeout_s: number; max_turns: number } | null;
   sandbox_usd_per_minute: number | null;
+  sandbox_points_per_minute: number | null;
+  points_per_usd: number | null;
 };
 
 let csrf = '';

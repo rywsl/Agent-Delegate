@@ -1,7 +1,7 @@
 import React from 'react';
 import { api } from '../lib/api';
 
-export function BillingView({ reload }: { reload: () => Promise<void> }) {
+export function BillingView({ points, pointsPerUsd, reload }: { points: number; pointsPerUsd: number; reload: () => Promise<void> }) {
   const [code, setCode] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [logs, setLogs] = React.useState<{ time: number; model: string; input_tokens: number; output_tokens: number; cost_usd: number; content: string }[]>([]);
@@ -14,7 +14,7 @@ export function BillingView({ reload }: { reload: () => Promise<void> }) {
     <div className="max-w-5xl space-y-5">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">账单</h1>
-        <p className="mt-1 text-xs text-zinc-500">平台模型费走网关流水。自带密钥的任务只记沙箱时间。</p>
+        <p className="mt-1 text-xs text-zinc-500">沙箱积分 {points}。充值金额按 1 USD = {pointsPerUsd} 积分入账。模型费仍走网关流水。</p>
       </div>
       <div className="rounded-xl glass-panel p-5">
         <div className="flex flex-wrap gap-2">
@@ -22,8 +22,8 @@ export function BillingView({ reload }: { reload: () => Promise<void> }) {
             className="min-w-48 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 font-mono text-xs dark:border-zinc-800" />
           <button className="rounded-lg glass-button-primary px-3.5 py-1.5 text-xs font-medium" onClick={async () => {
             try {
-              const result = await api<{ credited_usd: number }>('/api/console/billing/redeem', { method: 'POST', body: JSON.stringify({ code }) });
-              setMessage(`已入账 ${result.credited_usd} USD`);
+              const result = await api<{ credited_usd: number; credited_points: number; points_per_usd: number }>('/api/console/billing/redeem', { method: 'POST', body: JSON.stringify({ code }) });
+              setMessage(`已入账 ${result.credited_points} 积分（${result.credited_usd} USD，1 USD = ${result.points_per_usd} 积分）`);
               setCode('');
               await reload();
             } catch (err) {

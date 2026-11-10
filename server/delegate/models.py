@@ -57,6 +57,8 @@ class User(Base):
     pref_timeout_s: Mapped[int | None]
     # None means the account has not received its one-time sandbox grant yet.
     sandbox_free_seconds: Mapped[int | None] = mapped_column(Integer)
+    # Sandbox wallet. Recharge amounts convert into these points; model fees stay on the gateway.
+    points: Mapped[int] = mapped_column(Integer, default=0)
 
     api_keys: Mapped[list[ApiKey]] = relationship(back_populates="user")
     provider_keys: Mapped[list[UserProviderKey]] = relationship(back_populates="user")
@@ -131,6 +133,7 @@ class Task(Base):
     sandbox_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sandbox_billed_seconds: Mapped[int] = mapped_column(Integer, default=0)
     sandbox_billed_quota: Mapped[int] = mapped_column(Integer, default=0)
+    sandbox_billed_points: Mapped[int] = mapped_column(Integer, default=0)
     sandbox_free_seconds_used: Mapped[int] = mapped_column(Integer, default=0)
 
     # Billing, authoritative numbers come from new-api logs of the per-task token.
@@ -225,8 +228,9 @@ class LedgerEntry(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    kind: Mapped[str] = mapped_column(String(32))  # signup_credit | admin_grant | redeem_code
-    quota_delta: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))  # signup_credit | admin_grant | redeem_code | sandbox_time
+    quota_delta: Mapped[int] = mapped_column(Integer, default=0)
+    points_delta: Mapped[int] = mapped_column(Integer, default=0)
     actor: Mapped[str] = mapped_column(String(100))
     note: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | applied | failed

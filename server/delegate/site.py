@@ -12,6 +12,8 @@ from .models import SiteSetting, User
 
 MODELS_KEY = "models_json"
 SANDBOX_PRICE_KEY = "sandbox_usd_per_minute"
+SANDBOX_POINTS_KEY = "sandbox_points_per_minute"
+POINTS_PER_USD_KEY = "points_per_usd"
 FREE_MINUTES_KEY = "free_sandbox_minutes"
 MAX_QUEUED_KEY = "max_queued_tasks"
 MAX_QUEUED_USER_KEY = "max_queued_per_user"
@@ -38,6 +40,45 @@ def sandbox_usd_per_minute(db: Session) -> float:
     if raw is None:
         return get_settings().sandbox_usd_per_minute
     return max(0.0, float(raw))
+
+
+def points_per_usd(db: Session) -> float:
+    """How many sandbox points one USD of recharge becomes. Must stay positive."""
+    raw = _raw(db, POINTS_PER_USD_KEY)
+    configured = get_settings().points_per_usd
+    if raw is None:
+        return configured if configured > 0 else 100.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return configured if configured > 0 else 100.0
+    return value if value > 0 else (configured if configured > 0 else 100.0)
+
+
+def sandbox_points_per_minute(db: Session) -> float:
+    """Points charged for each billed sandbox minute.
+
+    Until an admin saves a points price, convert the existing USD price at the current ratio
+    so a previous per-minute rate keeps the same money value.
+    """
+    raw = _raw(db, SANDBOX_POINTS_KEY)
+    if raw is not None:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return round(sandbox_usd_per_minute(db) * points_per_usd(db), 4)
+
+
+def usd_to_points(db: Session, usd: float) -> int:
+    """Convert a recharge amount into whole sandbox points at the current ratio."""
+    if usd == 0:
+        return 0
+    ratio = points_per_usd(db)
+    points = int(round(abs(float(usd)) * ratio))
+    if points == 0:
+        points = 1
+    return points if usd > 0 else -points
 
 
 def free_grant_seconds(db: Session) -> int:
@@ -82,6 +123,8 @@ def snapshot(db: Session) -> dict:
     global_max, per_user = queue_limits(db)
     return {
         "sandbox_usd_per_minute": sandbox_usd_per_minute(db),
+        "sandbox_points_per_minute": sandbox_points_per_minute(db),
+        "points_per_usd": points_per_usd(db),
         "free_sandbox_minutes": free_grant_seconds(db) / 60,
         "max_queued_tasks": global_max,
         "max_queued_per_user": per_user,

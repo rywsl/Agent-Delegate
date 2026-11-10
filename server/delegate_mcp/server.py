@@ -153,7 +153,8 @@ def format_task(view: dict[str, Any]) -> str:
     cost = (
         f"${billing.get('total_cost_usd', billing.get('cost_usd', 0)):.4f} total "
         f"(model ${billing.get('model_cost_usd', billing.get('cost_usd', 0)):.4f}, "
-        f"sandbox ${billing.get('sandbox_cost_usd', 0):.4f} / {int(billing.get('sandbox_seconds') or 0)}s, "
+        f"sandbox {int(billing.get('sandbox_points') or 0)} pts "
+        f"(${billing.get('sandbox_cost_usd', 0):.4f}) / {int(billing.get('sandbox_seconds') or 0)}s, "
         f"{billing.get('tokens', 0):,} tokens)"
     )
     lines += ["", f"Billing: {mode}. Cost: {cost}{'' if billing.get('final') else ' (provisional)'}"]

@@ -46,6 +46,7 @@ function asTask(raw: Record<string, unknown>): Task {
     patch_stats: (raw.patch_stats as Task['patch_stats']) || undefined,
     outputs: Array.isArray(raw.outputs) ? raw.outputs as Task['outputs'] : [],
     agent_usage: (raw.agent_usage as Task['agent_usage']) || undefined,
+    sandbox_points: raw.sandbox_points == null ? undefined : Number(raw.sandbox_points),
     events: Array.isArray(raw.events) ? raw.events as Task['events'] : [],
   };
 }
@@ -170,6 +171,7 @@ export default function App() {
             patch_stats: (snap.patch_stats as Task['patch_stats']) || task.patch_stats,
             raw_patch: (snap.raw_patch as string | undefined) || task.raw_patch,
             outputs: Array.isArray(snap.outputs) ? snap.outputs as Task['outputs'] : task.outputs,
+            sandbox_points: snap.sandbox_points == null ? task.sandbox_points : Number(snap.sandbox_points),
             events: [...(task.events || []), ...incoming],
           };
         }));
@@ -253,7 +255,7 @@ export default function App() {
 
   const user = session.user;
   const initials = (user.display_name || user.email).slice(0, 2).toUpperCase();
-  const billingLine = `${user.balance_usd == null ? '余额暂不可用' : `余额 ${user.balance_usd} USD`} · 免费沙箱 ${Math.floor(user.sandbox_free_seconds / 60)} 分钟 · ${user.billing_mode === 'byok' ? '自带密钥' : '平台密钥'}`;
+  const billingLine = `${user.balance_usd == null ? '模型余额暂不可用' : `模型余额 ${user.balance_usd} USD`} · 沙箱积分 ${user.points ?? 0} · 1 USD = ${session.points_per_usd ?? 100} 积分 · 免费沙箱 ${Math.floor(user.sandbox_free_seconds / 60)} 分钟 · ${user.billing_mode === 'byok' ? '自带密钥' : '平台密钥'}`;
   const queueLine = dash.queue ? `排队 ${dash.queue.waiting}/${dash.queue.max}` : undefined;
 
   return (
@@ -330,7 +332,9 @@ export default function App() {
             )}
             {tab === 'mcp' && <McpGuideModal activeKeyPrefix={keys.find((key) => key.active)?.prefix || 'dlg_'} />}
             {tab === 'audit' && <AuditView logs={logs} />}
-            {tab === 'billing' && <BillingView reload={async () => setSession(await loadSession())} />}
+            {tab === 'billing' && (
+              <BillingView points={user.points ?? 0} pointsPerUsd={session.points_per_usd ?? 100} reload={async () => setSession(await loadSession())} />
+            )}
             {tab.startsWith('admin-') && <AdminViews tab={tab} />}
           </div>
         </main>

@@ -58,14 +58,16 @@ def session_scope() -> Iterator[Session]:
 
 def _upgrade_existing_tables() -> None:
     additions = {
-        "users": {"sandbox_free_seconds": "INTEGER"},
+        "users": {"sandbox_free_seconds": "INTEGER", "points": "INTEGER DEFAULT 0"},
         "tasks": {
             "billing_mode": "VARCHAR(16) DEFAULT 'platform'",
             "sandbox_started_at": "TIMESTAMP",
             "sandbox_billed_seconds": "INTEGER DEFAULT 0",
             "sandbox_billed_quota": "INTEGER DEFAULT 0",
+            "sandbox_billed_points": "INTEGER DEFAULT 0",
             "sandbox_free_seconds_used": "INTEGER DEFAULT 0",
         },
+        "ledger": {"points_delta": "INTEGER DEFAULT 0"},
     }
     engine = get_engine()
     with engine.begin() as connection:

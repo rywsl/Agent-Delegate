@@ -20,10 +20,13 @@ from ..site import (
     ensure_free_seconds,
     model_map,
     offered_models,
+    points_per_usd,
     put,
     queue_limits,
+    sandbox_points_per_minute,
     sandbox_usd_per_minute,
     snapshot,
+    usd_to_points,
 )
 from ..tasks import (
     QueueFull,
@@ -73,7 +76,9 @@ class ProviderKeyIn(BaseModel):
 
 
 class PlatformIn(BaseModel):
-    sandbox_usd_per_minute: float
+    sandbox_usd_per_minute: float | None = None
+    sandbox_points_per_minute: float | None = None
+    points_per_usd: float | None = None
     free_sandbox_minutes: float
     max_queued_tasks: int
     max_queued_per_user: int
@@ -119,6 +124,7 @@ def _user_view(db: Session, user: User) -> dict[str, Any]:
         "display_name": user.display_name,
         "is_admin": user.is_admin,
         "balance_usd": round(get_settings().quota_to_usd(balance), 4) if balance is not None else None,
+        "points": int(user.points or 0),
         "sandbox_free_seconds": ensure_free_seconds(db, user),
         "billing_mode": billing.mode_for(db, user, agent),
     }
@@ -156,6 +162,7 @@ def _task_row(db: Session, task: Task) -> dict[str, Any]:
         },
         "agent_usage": task.agent_usage or {},
         "queue_position": queue_position(db, task),
+        "sandbox_points": int(task.sandbox_billed_points or 0),
         "cost_usd": round(get_settings().quota_to_usd((task.billed_quota or 0) + (task.sandbox_billed_quota or 0)), 4),
     }
 
@@ -268,6 +275,8 @@ def session(request: Request, user: User | None = Depends(current_user), db: Ses
         models=model_map(db, s.agents) if user else {},
         options=options,
         sandbox_usd_per_minute=sandbox_usd_per_minute(db) if user else None,
+        sandbox_points_per_minute=sandbox_points_per_minute(db) if user else None,
+        points_per_usd=points_per_usd(db) if user else None,
     )
 
 
@@ -312,6 +321,7 @@ def register(request: Request, body: AuthIn, db: Session = Depends(get_db)):
         billing.ensure_mirror(db, user)
         if s.signup_credit_usd > 0:
             billing.adjust(db, user, s.usd_to_quota(s.signup_credit_usd), kind="signup_credit", actor="system", note="注册赠送")
+            billing.grant_recharge_points(db, user, s.signup_credit_usd, kind="signup_credit", actor="system", note="注册赠送")
         db.commit()
     except billing.BillingError as exc:
         db.rollback()
@@ -412,6 +422,7 @@ def task_events(task_id: str, after: int = Query(0, ge=0), user: User = Depends(
         "result_text": detail["result_text"],
         "agent_usage": detail["agent_usage"],
         "patch_stats": detail["patch_stats"],
+        "sandbox_points": detail["sandbox_points"],
         "raw_patch": detail["raw_patch"],
         "outputs": detail["outputs"],
     }
@@ -570,7 +581,13 @@ class RedeemIn(BaseModel):
 @router.post("/billing/redeem", dependencies=[Depends(verify_csrf)])
 def redeem_code(request: Request, body: RedeemIn, user: User = Depends(require_user), db: Session = Depends(get_db)):
     quota = billing.redeem(db, user, body.code.strip(), actor=f"user:{user.id}", request=request)
-    return {"credited_usd": round(get_settings().quota_to_usd(quota), 4)}
+    usd = get_settings().quota_to_usd(quota)
+    return {
+        "credited_usd": round(usd, 4),
+        "credited_points": usd_to_points(db, usd),
+        "points": int(user.points or 0),
+        "points_per_usd": points_per_usd(db),
+    }
 
 
 @router.get("/audit")
@@ -607,13 +624,28 @@ def admin_settings(user: User = Depends(require_admin), db: Session = Depends(ge
 
 @router.post("/admin/settings", dependencies=[Depends(verify_csrf)])
 def save_admin_settings(body: PlatformIn, user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    from ..site import FREE_MINUTES_KEY, MAX_QUEUED_KEY, MAX_QUEUED_USER_KEY, SANDBOX_PRICE_KEY, save_model_map
+    from ..site import (
+        FREE_MINUTES_KEY,
+        MAX_QUEUED_KEY,
+        MAX_QUEUED_USER_KEY,
+        POINTS_PER_USD_KEY,
+        SANDBOX_POINTS_KEY,
+        SANDBOX_PRICE_KEY,
+        save_model_map,
+    )
 
-    if body.sandbox_usd_per_minute < 0 or body.free_sandbox_minutes < 0:
-        raise HTTPException(400, "价格和免费额度不能为负")
+    if body.points_per_usd is None or body.points_per_usd <= 0:
+        raise HTTPException(400, "充值比例必须大于 0")
+    if body.sandbox_points_per_minute is None or body.sandbox_points_per_minute < 0 or body.free_sandbox_minutes < 0:
+        raise HTTPException(400, "沙箱积分单价和免费额度不能为负")
     if body.max_queued_tasks < 1 or body.max_queued_per_user < 1:
         raise HTTPException(400, "队列上限至少为 1")
-    put(db, SANDBOX_PRICE_KEY, str(body.sandbox_usd_per_minute))
+    put(db, POINTS_PER_USD_KEY, str(body.points_per_usd))
+    put(db, SANDBOX_POINTS_KEY, str(body.sandbox_points_per_minute))
+    if body.sandbox_usd_per_minute is not None:
+        if body.sandbox_usd_per_minute < 0:
+            raise HTTPException(400, "价格不能为负")
+        put(db, SANDBOX_PRICE_KEY, str(body.sandbox_usd_per_minute))
     put(db, FREE_MINUTES_KEY, str(body.free_sandbox_minutes))
     put(db, MAX_QUEUED_KEY, str(int(body.max_queued_tasks)))
     put(db, MAX_QUEUED_USER_KEY, str(int(body.max_queued_per_user)))
@@ -632,6 +664,7 @@ def admin_users(user: User = Depends(require_admin), db: Session = Depends(get_d
     return {"users": [{
         "id": row.id, "email": row.email, "display_name": row.display_name,
         "is_admin": row.is_admin, "is_active": row.is_active,
+        "points": int(row.points or 0),
         "sandbox_free_seconds": row.sandbox_free_seconds,
         "newapi_user_id": row.newapi_user_id,
     } for row in rows]}
@@ -642,10 +675,20 @@ def admin_quota(user_id: int, body: QuotaIn, user: User = Depends(require_admin)
     target = db.get(User, user_id)
     if target is None:
         raise HTTPException(404, "用户不存在")
-    signed = get_settings().usd_to_quota(abs(body.usd)) * (1 if body.direction != "subtract" else -1)
+    signed_usd = abs(body.usd) * (1 if body.direction != "subtract" else -1)
+    signed = get_settings().usd_to_quota(abs(body.usd)) * (1 if signed_usd > 0 else -1)
+    before = int(target.points or 0)
     billing.adjust(db, target, signed, kind="admin_grant" if signed > 0 else "admin_deduct",
                    actor=f"admin:{user.id}", note=body.note[:200])
-    return {"balance_usd": round(get_settings().quota_to_usd(billing.balance_quota(target) or 0), 4)}
+    billing.grant_recharge_points(
+        db, target, signed_usd, kind="admin_grant" if signed_usd > 0 else "admin_deduct",
+        actor=f"admin:{user.id}", note=body.note[:200],
+    )
+    return {
+        "balance_usd": round(get_settings().quota_to_usd(billing.balance_quota(target) or 0), 4),
+        "points": int(target.points or 0),
+        "points_delta": int(target.points or 0) - before,
+    }
 
 
 @router.post("/admin/users/{user_id}/free-seconds", dependencies=[Depends(verify_csrf)])
@@ -687,7 +730,9 @@ def admin_codes(body: CodeIn, user: User = Depends(require_admin), db: Session =
 def admin_code_list(user: User = Depends(require_admin), db: Session = Depends(get_db)):
     rows = db.scalars(select(RedeemCode).order_by(RedeemCode.id.desc()).limit(100)).all()
     return {"codes": [{
-        "id": row.id, "hint": row.hint, "quota_usd": round(get_settings().quota_to_usd(row.quota), 4),
+        "id": row.id, "hint": row.hint,
+        "quota_usd": round(get_settings().quota_to_usd(row.quota), 4),
+        "points": usd_to_points(db, get_settings().quota_to_usd(row.quota)),
         "note": row.note, "created_at": _iso(row.created_at), "redeemed_by": row.redeemed_by,
         "redeemed_at": _iso(row.redeemed_at),
     } for row in rows]}

@@ -91,6 +91,7 @@ export interface Task {
   patch_stats?: PatchStats;
   outputs?: OutputFile[];
   agent_usage?: AgentUsage;
+  sandbox_points?: number;
   events?: NormEvent[];
   event_count?: number;
   api_key_prefix?: string;

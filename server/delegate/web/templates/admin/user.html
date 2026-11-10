@@ -22,6 +22,7 @@
       <div>状态</div><div>{{ '正常' if target.is_active else '停用' }}{{ ' · 管理员' if target.is_admin }}</div>
       <div>注册</div><div>{{ fmt_dt(target.created_at) }}</div>
       <div>最近登录</div><div>{{ fmt_dt(target.last_login_at) }}</div>
+      <div>沙箱积分</div><div><strong>{{ target.points or 0 }}</strong></div>
     </div>
   </div>
   <div class="panel">
@@ -30,7 +31,7 @@
     <div class="kv">
       <div>new-api 用户</div><div class="mono">#{{ mirror.id }} {{ mirror.username }}</div>
       <div>分组</div><div>{{ mirror.group }}</div>
-      <div>余额</div><div><strong>{{ fmt_usd(mirror.quota) }}</strong></div>
+      <div>模型余额</div><div><strong>{{ fmt_usd(mirror.quota) }}</strong></div>
       <div>累计消费</div><div>{{ fmt_usd(mirror.used_quota) }}</div>
       <div>请求次数</div><div>{{ fmt_int(mirror.request_count) }}</div>
       <div>网关状态</div><div>{{ '启用' if mirror.status == 1 else '禁用' }}</div>
@@ -46,14 +47,14 @@
       <label>备注</label><input type="text" name="note">
       <div style="margin-top:12px"><button>提交</button></div>
     </form>
-    <p class="small muted">通过网关的原子 add_quota 操作执行，不会与进行中的消费产生竞态。</p>
+    <p class="small muted">金额同时记入模型余额，并按后台的充值比例换成沙箱积分。</p>
   </div>
 </div>
 <div class="panel"><h2>最近任务</h2>{{ task_rows(tasks) }}</div>
 <div class="panel">
   <h2>余额变动</h2>
   <table><thead><tr><th>时间</th><th>类型</th><th class="num">金额</th><th>操作者</th><th>备注</th><th>状态</th></tr></thead><tbody>
-  {% for e in ledger %}<tr><td class="small">{{ fmt_dt(e.ts) }}</td><td>{{ e.kind }}</td><td class="num">{{ fmt_usd(e.quota_delta) }}</td>
+  {% for e in ledger %}<tr><td class="small">{{ fmt_dt(e.ts) }}</td><td>{{ e.kind }}</td><td class="num">{% if e.points_delta %}{{ e.points_delta }} 积分{% elif e.quota_delta %}{{ fmt_usd(e.quota_delta) }}{% else %}0{% endif %}</td>
     <td class="mono small">{{ e.actor }}</td><td class="small">{{ e.note }}</td><td><span class="badge {{ e.status }}">{{ e.status }}</span></td></tr>
   {% else %}<tr><td colspan="6" class="muted">暂无</td></tr>{% endfor %}
   </tbody></table>

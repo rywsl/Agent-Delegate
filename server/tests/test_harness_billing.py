@@ -32,6 +32,51 @@ def test_package_list_is_unpinned_and_matches_the_image():
     assert all("@" not in name.split("/")[-1] or not name.split("@")[-1][:1].isdigit() for name in NPM_PACKAGES)
 
 
+def test_recharge_converts_usd_to_points_and_sandbox_spends_points(env):
+    from delegate import billing
+    from delegate.config import get_settings
+    from delegate.db import session_scope
+    from delegate.models import Task, User, utcnow
+    from delegate.security import hash_password
+    from delegate.site import POINTS_PER_USD_KEY, SANDBOX_POINTS_KEY, put
+
+    with session_scope() as db:
+        put(db, POINTS_PER_USD_KEY, "80")
+        put(db, SANDBOX_POINTS_KEY, "2")
+        user = User(email="points@example.com", display_name="p", password_hash=hash_password("password1"),
+                    sandbox_free_seconds=60, points=0)
+        db.add(user)
+        db.flush()
+        [code] = billing.create_codes(db, get_settings().usd_to_quota(2), 1, actor="admin:1")
+        billing.redeem(db, user, code, actor="user:1")
+        assert user.points == 160
+        assert billing.balance_quota(user) == get_settings().usd_to_quota(2)
+
+        put(db, POINTS_PER_USD_KEY, "50")
+        [again] = billing.create_codes(db, get_settings().usd_to_quota(1), 1, actor="admin:1")
+        billing.redeem(db, user, again, actor="user:1")
+        assert user.points == 210
+
+        task = Task(
+            id="t_points", user_id=user.id, title="t", prompt="p", source="api", agent="claude", model="m",
+            budget_quota=1, timeout_s=60, max_turns=1, billing_mode="byok", sandbox_started_at=utcnow(),
+        )
+        db.add(task)
+        billing.charge_sandbox(db, task, 130)
+        assert task.sandbox_billed_seconds == 180
+        assert task.sandbox_free_seconds_used == 60
+        assert task.sandbox_billed_points == 4
+        assert task.sandbox_billed_quota == 0
+        assert user.sandbox_free_seconds == 0
+        assert user.points == 206
+
+        user.points = 1
+        billing.charge_sandbox(db, task, 120)
+        assert task.sandbox_billed_points == 1
+        assert user.points == 0
+        assert "short by 3 points" in (task.status_reason or "")
+
+
 def test_sandbox_charge_spends_free_time_before_the_wallet():
     from delegate.billing import sandbox_charge_parts
 

@@ -19,7 +19,7 @@ from . import audit, transfer
 from . import billing
 from .config import get_settings
 from .models import Task, TaskStatus, Upload, UploadStatus, User, new_task_id, utcnow
-from .site import ensure_free_seconds, offered_models, queue_limits
+from .site import ensure_free_seconds, offered_models, points_per_usd, queue_limits
 from .security import encrypt
 
 MAX_PROMPT_CHARS = 100_000
@@ -349,13 +349,20 @@ def public_view(session: Session, task: Task, *, include_patch: bool = True) -> 
             ],
         }
     model_cost = s.quota_to_usd(task.billed_quota)
-    sandbox_cost = s.quota_to_usd(task.sandbox_billed_quota)
+    ratio = points_per_usd(session)
+    sandbox_points = int(task.sandbox_billed_points or 0)
+    if sandbox_points:
+        sandbox_cost = sandbox_points / ratio if ratio else 0
+    else:
+        sandbox_cost = s.quota_to_usd(task.sandbox_billed_quota)
     total = model_cost + sandbox_cost
     view["billing"] = {
         "mode": task.billing_mode or "platform",
         "model_cost_usd": round(model_cost, 4),
         "sandbox_seconds": int(task.sandbox_billed_seconds or 0),
         "sandbox_free_seconds": int(task.sandbox_free_seconds_used or 0),
+        "sandbox_points": sandbox_points,
+        "points_per_usd": ratio,
         "sandbox_cost_usd": round(sandbox_cost, 4),
         "cost_usd": round(total, 4),
         "total_cost_usd": round(total, 4),

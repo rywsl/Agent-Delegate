@@ -115,8 +115,13 @@ def user_adjust(
         try:
             billing.adjust(db, target, quota, kind="admin_grant" if quota > 0 else "admin_deduct",
                            actor=f"admin:{user.id}", note=note.strip()[:500], request=request)
+            signed_usd = amount_usd if quota > 0 else -amount_usd
+            points = billing.grant_recharge_points(
+                db, target, signed_usd, kind="admin_grant" if quota > 0 else "admin_deduct",
+                actor=f"admin:{user.id}", note=note.strip()[:500], request=request,
+            )
             verb = "扣减" if quota < 0 else "充值"
-            flash(request, f"已为 {target.email} {verb} {amount_usd:.2f} USD", "success")
+            flash(request, f"已为 {target.email} {verb} {amount_usd:.2f} USD，沙箱积分现为 {points}", "success")
         except billing.BillingError as exc:
             flash(request, f"操作失败：{exc}", "error")
     return RedirectResponse(f"/admin/users/{user_id}", status_code=303)

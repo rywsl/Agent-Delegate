@@ -69,6 +69,7 @@ def me(principal: tuple[User, ApiKey] = Depends(api_principal), db: Session = De
     return {
         "email": user.email,
         "balance_usd": round(get_settings().quota_to_usd(balance), 4) if balance is not None else None,
+        "points": int(user.points or 0),
         "sandbox_free_seconds": ensure_free_seconds(db, user),
         "billing_mode": billing.mode_for(db, user, agent),
     }

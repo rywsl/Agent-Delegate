@@ -426,6 +426,33 @@ def adjust(db: Session, user: User, quota: int, *, kind: str, actor: str, note: 
                  quota=quota, kind=kind, note=note)
 
 
+def credit_points(db: Session, user: User, points: int, *, kind: str, actor: str, note: str = "",
+                  request: Any = None) -> int:
+    """Add or remove sandbox points. A debit never takes the balance below zero."""
+    current = int(user.points or 0)
+    if points < 0:
+        points = -min(current, -points)
+    if points == 0:
+        return current
+    user.points = current + points
+    entry = LedgerEntry(
+        user_id=user.id, kind=kind, quota_delta=0, points_delta=points, actor=actor, note=note, status="applied",
+    )
+    db.add(entry)
+    db.flush()
+    audit.record(db, "billing.points", actor=actor, user_id=user.id, target=f"ledger:{entry.id}", request=request,
+                 points=points, balance=user.points, kind=kind, note=note)
+    return int(user.points)
+
+
+def grant_recharge_points(db: Session, user: User, usd: float, *, kind: str, actor: str, note: str = "",
+                          request: Any = None) -> int:
+    """Turn a money amount into sandbox points at the admin-configured ratio."""
+    from .site import usd_to_points
+
+    return credit_points(db, user, usd_to_points(db, usd), kind=kind, actor=actor, note=note, request=request)
+
+
 def create_codes(db: Session, quota: int, count: int, *, actor: str, note: str = "",
                  valid_days: int | None = None) -> list[str]:
     if quota <= 0:
@@ -486,16 +513,15 @@ def provider_key(db: Session, user: User, agent: str) -> UserProviderKey | None:
 
 
 def affordable_sandbox_seconds(db: Session, user: User) -> int:
-    """How long a bring-your-own-key task can run before the free grant and wallet run out."""
-    from .site import ensure_free_seconds, sandbox_usd_per_minute
+    """How long a bring-your-own-key task can run before the free grant and points run out."""
+    from .site import ensure_free_seconds, sandbox_points_per_minute
 
-    price = sandbox_usd_per_minute(db)
+    price = sandbox_points_per_minute(db)
     free = ensure_free_seconds(db, user)
     if price <= 0:
         return get_settings().max_timeout_s
-    balance = balance_quota(user) or 0
-    paid = int(balance / max(get_settings().usd_to_quota(price) / 60, 1))
-    return free + paid
+    paid_minutes = int((user.points or 0) / price)
+    return free + paid_minutes * 60
 
 
 def assert_can_submit(db: Session, user: User, agent: str) -> str:
@@ -504,43 +530,40 @@ def assert_can_submit(db: Session, user: User, agent: str) -> str:
         check_can_start(db, user)
         return mode
     if affordable_sandbox_seconds(db, user) < 60:
-        raise BillingError("sandbox time is used up and the balance cannot cover another minute", 402)
+        raise BillingError("sandbox time is used up and the points cannot cover another minute", 402)
     return mode
 
 
 def charge_sandbox(db: Session, task: Task, seconds: float) -> None:
-    """Bill a finished bring-your-own-key task for the time its container actually ran."""
-    from .site import ensure_free_seconds, sandbox_usd_per_minute
+    """Bill a finished bring-your-own-key task in sandbox points for the time its container ran."""
+    from .site import ensure_free_seconds, sandbox_points_per_minute
 
     if task.billing_mode != "byok" or task.sandbox_started_at is None:
         return
     user = db.get(User, task.user_id)
     if user is None:
         return
-    price = sandbox_usd_per_minute(db)
+    price = sandbox_points_per_minute(db)
     free = ensure_free_seconds(db, user)
-    billed_seconds, free_used, quota = sandbox_charge_parts(
-        seconds, free, price, get_settings().newapi_quota_per_unit,
-    )
+    billed_seconds = 0 if seconds <= 0 else math.ceil(seconds / 60) * 60
+    free_used = min(max(int(free), 0), billed_seconds)
+    paid_minutes = (billed_seconds - free_used) / 60
+    cost = 0 if price <= 0 or paid_minutes <= 0 else max(1, int(round(paid_minutes * price)))
     user.sandbox_free_seconds = free - free_used
     task.sandbox_billed_seconds = billed_seconds
     task.sandbox_free_seconds_used = free_used
     task.sandbox_billed_quota = 0
-    if quota <= 0:
-        audit.record(db, "billing.sandbox", actor="system", user_id=user.id, target=task.id,
-                     seconds=billed_seconds, free_seconds=free_used, quota=0)
-        return
-    balance = balance_quota(user) or 0
-    debit = min(quota, max(balance, 0))
-    shortfall = quota - debit
-    task.sandbox_billed_quota = debit
-    if debit > 0:
-        adjust(db, user, -debit, kind="sandbox_time", actor="system",
-               note=f"sandbox {billed_seconds}s on {task.id}")
+    balance = int(user.points or 0)
+    debit = min(cost, max(balance, 0))
+    shortfall = cost - debit
+    task.sandbox_billed_points = debit
+    if debit:
+        credit_points(db, user, -debit, kind="sandbox_time", actor="system",
+                      note=f"sandbox {billed_seconds}s on {task.id}")
     audit.record(db, "billing.sandbox", actor="system", user_id=user.id, target=task.id,
-                 seconds=billed_seconds, free_seconds=free_used, quota=debit, shortfall=shortfall)
+                 seconds=billed_seconds, free_seconds=free_used, points=debit, shortfall=shortfall)
     if shortfall:
-        extra = f"sandbox charge short by {get_settings().quota_to_usd(shortfall):.4f} USD"
+        extra = f"sandbox charge short by {shortfall} points"
         task.status_reason = f"{task.status_reason}; {extra}" if task.status_reason else extra
 
 
@@ -581,6 +604,10 @@ def redeem(db: Session, user: User, code: str, *, actor: str, request: Any = Non
         raise BillingError("code already used", 400)
     try:
         adjust(db, user, row.quota, kind="redeem_code", actor=actor, note=f"code …{row.hint}", request=request)
+        grant_recharge_points(
+            db, user, get_settings().quota_to_usd(row.quota), kind="redeem_code", actor=actor,
+            note=f"code …{row.hint}", request=request,
+        )
     except BillingError:
         db.execute(update(RedeemCode).where(RedeemCode.id == row.id).values(redeemed_by=None, redeemed_at=None))
         db.commit()

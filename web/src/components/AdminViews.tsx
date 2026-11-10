@@ -5,6 +5,8 @@ import type { Tab } from './Sidebar';
 
 type Settings = {
   sandbox_usd_per_minute: number;
+  sandbox_points_per_minute: number;
+  points_per_usd: number;
   free_sandbox_minutes: number;
   max_queued_tasks: number;
   max_queued_per_user: number;
@@ -57,7 +59,8 @@ function Overview() {
 }
 
 function Users() {
-  const [rows, setRows] = React.useState<{ id: number; email: string; is_admin: boolean; is_active: boolean; sandbox_free_seconds: number | null }[]>([]);
+  const [rows, setRows] = React.useState<{ id: number; email: string; is_admin: boolean; is_active: boolean; sandbox_free_seconds: number | null; points: number }[]>([]);
+  const [notice, setNotice] = React.useState('');
   const [usd, setUsd] = React.useState('5');
   async function refresh() { setRows((await api<{ users: typeof rows }>('/api/console/admin/users')).users); }
   React.useEffect(() => { refresh(); }, []);
@@ -68,16 +71,21 @@ function Users() {
         {rows.map((row) => (
           <div key={row.id} className="mb-3 border-b border-zinc-200 pb-3 text-sm last:border-0 dark:border-zinc-800">
             <div className="font-medium">{row.email} {row.is_admin ? '· 管理员' : ''} {row.is_active ? '' : '· 已停用'}</div>
-            <div className="text-zinc-500">免费沙箱 {row.sandbox_free_seconds ?? 0} 秒</div>
+            <div className="text-zinc-500">沙箱积分 {row.points ?? 0} · 免费沙箱 {row.sandbox_free_seconds ?? 0} 秒</div>
             <div className="mt-2 flex flex-wrap gap-2">
               <TextInput value={usd} onChange={(e) => setUsd(e.target.value)} />
-              <button className="text-zinc-600" onClick={async () => { await api(`/api/console/admin/users/${row.id}/quota`, { method: 'POST', body: JSON.stringify({ usd: Number(usd), direction: 'add' }) }); }}>充值</button>
+              <button className="text-zinc-600" onClick={async () => {
+                const result = await api<{ points: number; points_delta: number }>(`/api/console/admin/users/${row.id}/quota`, { method: 'POST', body: JSON.stringify({ usd: Number(usd), direction: 'add' }) });
+                setNotice(`${row.email} 沙箱积分 ${result.points_delta >= 0 ? '+' : ''}${result.points_delta}，现为 ${result.points}`);
+                refresh();
+              }}>按金额充积分</button>
               <button className="text-zinc-600" onClick={async () => { await api(`/api/console/admin/users/${row.id}/free-seconds`, { method: 'POST', body: JSON.stringify({ seconds: 3600 }) }); refresh(); }}>赠送 60 分钟</button>
               <button className="text-zinc-600" onClick={async () => { await api(`/api/console/admin/users/${row.id}/toggle?field=active`, { method: 'POST' }); refresh(); }}>停用/启用</button>
             </div>
           </div>
         ))}
       </Panel>
+      {notice && <p className="text-sm">{notice}</p>}
     </div>
   );
 }
@@ -85,14 +93,14 @@ function Users() {
 function Codes() {
   const [amount, setAmount] = React.useState('10');
   const [fresh, setFresh] = React.useState<string[]>([]);
-  const [rows, setRows] = React.useState<{ id: number; hint: string; quota_usd: number; note: string }[]>([]);
+  const [rows, setRows] = React.useState<{ id: number; hint: string; quota_usd: number; points: number; note: string }[]>([]);
   async function refresh() { setRows((await api<{ codes: typeof rows }>('/api/console/admin/codes')).codes); }
   React.useEffect(() => { refresh(); }, []);
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold">充值码</h1>
       <Panel title="生成">
-        <Field label="面额（USD）"><TextInput value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        <Field label="面额（USD，兑换时按当前比例换成积分）"><TextInput value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <PrimaryButton onClick={async () => {
           const created = await api<{ codes: string[] }>('/api/console/admin/codes', { method: 'POST', body: JSON.stringify({ amount_usd: Number(amount), count: 1 }) });
           setFresh(created.codes);
@@ -101,7 +109,7 @@ function Codes() {
         {fresh.map((code) => <p key={code} className="mt-2 font-mono text-sm">{code}</p>)}
       </Panel>
       <Panel title="记录">
-        {rows.map((row) => <p key={row.id} className="text-sm">…{row.hint} · ${row.quota_usd} · {row.note}</p>)}
+        {rows.map((row) => <p key={row.id} className="text-sm">…{row.hint} · ${row.quota_usd} · {row.points} 积分 · {row.note}</p>)}
       </Panel>
     </div>
   );
@@ -166,7 +174,8 @@ function Platform() {
     <div>
       <h1 className="mb-4 text-xl font-semibold">计费与队列</h1>
       <Panel title="沙箱与排队">
-        <Field label="沙箱单价（USD / 分钟）"><TextInput value={settings.sandbox_usd_per_minute} onChange={(e) => setSettings({ ...settings, sandbox_usd_per_minute: Number(e.target.value) })} /></Field>
+        <Field label="充值比例（1 USD 换成多少积分）"><TextInput value={settings.points_per_usd} onChange={(e) => setSettings({ ...settings, points_per_usd: Number(e.target.value) })} /></Field>
+        <Field label="沙箱单价（积分 / 分钟）"><TextInput value={settings.sandbox_points_per_minute} onChange={(e) => setSettings({ ...settings, sandbox_points_per_minute: Number(e.target.value) })} /></Field>
         <Field label="新用户免费分钟（一次性，不按月重置）"><TextInput value={settings.free_sandbox_minutes} onChange={(e) => setSettings({ ...settings, free_sandbox_minutes: Number(e.target.value) })} /></Field>
         <Field label="全局排队上限"><TextInput value={settings.max_queued_tasks} onChange={(e) => setSettings({ ...settings, max_queued_tasks: Number(e.target.value) })} /></Field>
         <Field label="每用户排队上限"><TextInput value={settings.max_queued_per_user} onChange={(e) => setSettings({ ...settings, max_queued_per_user: Number(e.target.value) })} /></Field>
@@ -189,13 +198,13 @@ function Platform() {
 }
 
 function Tasks() {
-  const [rows, setRows] = React.useState<{ id: string; title: string; status: string; email: string; billing_mode: string; cost_usd: number }[]>([]);
+  const [rows, setRows] = React.useState<{ id: string; title: string; status: string; email: string; billing_mode: string; cost_usd: number; sandbox_points: number }[]>([]);
   React.useEffect(() => { api<{ tasks: typeof rows }>('/api/console/admin/tasks').then((data) => setRows(data.tasks)); }, []);
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold">全部任务</h1>
       <Panel title="队列与历史">
-        {rows.map((row) => <p key={row.id} className="text-sm">{row.email} · {row.title} · {row.status} · {row.billing_mode} · ${row.cost_usd}</p>)}
+        {rows.map((row) => <p key={row.id} className="text-sm">{row.email} · {row.title} · {row.status} · {row.billing_mode} · 模型 ${row.cost_usd} · 沙箱 {row.sandbox_points ?? 0} 积分</p>)}
       </Panel>
     </div>
   );

@@ -109,6 +109,8 @@ def register(
         if s.signup_credit_usd > 0:
             billing.adjust(db, user, s.usd_to_quota(s.signup_credit_usd), kind="signup_credit", actor="system",
                           note="注册赠送")
+            billing.grant_recharge_points(db, user, s.signup_credit_usd, kind="signup_credit", actor="system",
+                                          note="注册赠送")
         db.commit()
     except billing.BillingError as exc:
         db.rollback()

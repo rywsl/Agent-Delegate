@@ -63,8 +63,12 @@ def cmd_grant(args: argparse.Namespace) -> None:
         if user is None:
             sys.exit(f"no such user: {args.email}")
         billing.adjust(db, user, s.usd_to_quota(args.usd), kind="admin_grant", actor="cli", note=args.note or "")
+        points = billing.grant_recharge_points(db, user, args.usd, kind="admin_grant", actor="cli", note=args.note or "")
         balance = billing.balance_quota(user)
-    print(f"granted {args.usd:.2f} USD to {args.email}; balance {s.quota_to_usd(balance or 0):.4f} USD")
+    print(
+        f"granted {args.usd:.2f} USD to {args.email}; "
+        f"model balance {s.quota_to_usd(balance or 0):.4f} USD; sandbox points {points}"
+    )
 
 
 def main() -> None:

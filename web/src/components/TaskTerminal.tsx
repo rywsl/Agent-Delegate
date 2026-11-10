@@ -361,6 +361,8 @@ export const TaskTerminal: React.FC<TaskTerminalProps> = ({
                   : '0%'}
               </div>
               <div>turns             : {task.agent_usage?.turns ?? 0} / {task.max_turns}</div>
+              <div className="pt-2 text-zinc-400">--- sandbox ---</div>
+              <div>sandbox_points    : {task.sandbox_points ?? 0}</div>
             </div>
           )}
 

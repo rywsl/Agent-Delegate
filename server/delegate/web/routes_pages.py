@@ -330,6 +330,7 @@ def billing_page(request: Request, page: int = 1, user: User = Depends(require_u
         "billing.html",
         user,
         balance=billing.balance_quota(user),
+        points=int(user.points or 0),
         ledger=ledger,
         usage=usage,
         usage_error=usage_error,
@@ -344,7 +345,9 @@ def billing_redeem(request: Request, code: str = Form(...), user: User = Depends
                    db: Session = Depends(get_db)):
     try:
         quota = billing.redeem(db, user, code.strip(), actor=f"user:{user.id}", request=request)
-        flash(request, f"充值成功：{get_settings().quota_to_usd(quota):.2f} USD", "success")
+        usd = get_settings().quota_to_usd(quota)
+        from ..site import points_per_usd, usd_to_points
+        flash(request, f"充值成功：{usd:.2f} USD，沙箱积分 +{usd_to_points(db, usd)}（1 USD = {points_per_usd(db):g} 积分）", "success")
     except billing.BillingError as exc:
         flash(request, f"兑换失败：{exc}", "error")
     return RedirectResponse("/billing", status_code=303)

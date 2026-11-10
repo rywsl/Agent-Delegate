@@ -4,9 +4,9 @@
 {% block content %}
 <h1>账单</h1>
 <div class="row">
-  <div class="panel"><div class="stat-label">当前余额</div>
+  <div class="panel"><div class="stat-label">模型余额</div>
     <div class="stat">{% if balance is none %}<span class="muted">不可用</span>{% else %}{{ fmt_usd(balance) }}{% endif %}</div>
-    <p class="small muted">所有模型调用都经由计费网关按 token 计费；每个任务使用独立的网关令牌，额度即任务预算。</p></div>
+    <p class="small muted">模型调用经由计费网关按 token 计费。沙箱按积分计费，当前 {{ points }} 积分。</p></div>
   <div class="panel"><h2>兑换充值码</h2>
     <form class="actions" method="post" action="/billing/redeem">
       <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -49,7 +49,7 @@
     {% set kinds = {'signup_credit': '注册赠送', 'admin_grant': '管理员充值', 'admin_deduct': '管理员扣减', 'redeem_code': '兑换码'} %}
     {% for e in ledger %}
       <tr><td class="small">{{ fmt_dt(e.ts) }}</td><td>{{ kinds.get(e.kind, e.kind) }}</td>
-        <td class="num">{{ fmt_usd(e.quota_delta) }}</td><td class="mono small">{{ e.actor }}</td>
+        <td class="num">{% if e.points_delta %}{{ e.points_delta }} 积分{% elif e.quota_delta %}{{ fmt_usd(e.quota_delta) }}{% else %}0{% endif %}</td><td class="mono small">{{ e.actor }}</td>
         <td class="small">{{ e.note }}</td><td><span class="badge {{ e.status }}">{{ e.status }}</span>{% if e.error %}<div class="small muted">{{ e.error }}</div>{% endif %}</td></tr>
     {% else %}
       <tr><td colspan="6" class="muted">暂无记录</td></tr>

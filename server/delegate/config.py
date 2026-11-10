@@ -70,6 +70,7 @@ class Settings:
     max_budget_usd: float
     min_balance_usd: float
     sandbox_usd_per_minute: float
+    points_per_usd: float
     free_sandbox_minutes: float
     max_queued_tasks: int
     max_queued_per_user: int
@@ -172,6 +173,7 @@ def get_settings() -> Settings:
         max_budget_usd=_float("DELEGATE_MAX_BUDGET_USD", 50.0),
         min_balance_usd=_float("DELEGATE_MIN_BALANCE_USD", 0.10),
         sandbox_usd_per_minute=_float("DELEGATE_SANDBOX_USD_PER_MINUTE", 0.02),
+        points_per_usd=_float("DELEGATE_POINTS_PER_USD", 100),
         free_sandbox_minutes=_float("DELEGATE_FREE_SANDBOX_MINUTES", 60),
         max_queued_tasks=_int("DELEGATE_MAX_QUEUED_TASKS", 200),
         max_queued_per_user=_int("DELEGATE_MAX_QUEUED_PER_USER", 8),
